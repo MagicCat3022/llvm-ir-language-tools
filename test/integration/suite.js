@@ -45,6 +45,8 @@ async function run() {
   assert.match(hoverText(hovers), /%value/);
   assert.match(hoverText(hovers), /\(variable\) %value: i32 = add i32 %left, %right/);
   assert.equal((hoverText(hovers).match(/```llvm-ir/g) || []).length, 1, 'SSA hover has one source preview');
+  const rawHover = hovers.flatMap(h => h.contents).map(c => typeof c === 'string' ? c : c.value).join('\n');
+  assert.doesNotMatch(rawHover, /&nbsp;/, 'hover prose keeps ordinary spaces so it can wrap');
   hovers = await vscode.commands.executeCommand('vscode.executeHoverProvider', document.uri, at(document, '= add', 3));
   assert.match(hoverText(hovers), /add|sum|integer/i);
   assert.match(hoverText(hovers), /llvm\.org/);

@@ -24,7 +24,9 @@ async function main() {
         '--user-data-dir=' + path.join(temporary, 'user'),
         '--extensions-dir=' + path.join(temporary, 'extensions'),
         '--disable-extensions', '--skip-welcome', '--skip-release-notes',
-        '--disable-gpu', '--no-sandbox', '--disable-workspace-trust'
+        '--disable-gpu', '--no-sandbox', '--disable-workspace-trust',
+        // Without a display, render through Chromium's headless platform.
+        ...(process.env.VSCODE_TEST_HEADLESS ? ['--ozone-platform=headless'] : [])
       ]
     };
     if (process.env.VSCODE_EXECUTABLE_PATH) options.vscodeExecutablePath = process.env.VSCODE_EXECUTABLE_PATH;

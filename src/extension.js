@@ -19,9 +19,19 @@ const semanticKinds = { function: 0, global: 1, variable: 1, parameter: 2, type:
 const spanRange = (document, span) => new vscode.Range(document.positionAt(span.start), document.positionAt(span.end));
 const config = document => vscode.workspace.getConfiguration('llvmIR', document.uri);
 
+// VS Code's appendText turns every space into &nbsp;, so long prose could not
+// wrap and ran past the hover's edge. Escape only Markdown syntax instead.
+function plainMarkdown(text) {
+  return String(text)
+    .replace(/[\\`*_[\]<>&|~]/g, character => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[character] || `\\${character}`)
+    .replace(/^(\s*)([#+-])(?=\s)/gm, '$1\\$2')
+    .replace(/^(\s*\d+)\.(?=\s)/gm, '$1\\.');
+}
+
 function markdown() {
   const result = new vscode.MarkdownString();
   result.isTrusted = false;
+  result.appendText = text => result.appendMarkdown(plainMarkdown(text));
   return result;
 }
 
