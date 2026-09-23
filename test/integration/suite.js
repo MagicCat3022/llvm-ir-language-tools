@@ -96,7 +96,9 @@ async function run() {
   assert.match(comparisonHover, /samesign/);
   assert.match(comparisonHover, /poison/);
   const labelHover = hoverText(await vscode.commands.executeCommand('vscode.executeHoverProvider', blocks.uri, at(blocks, 'label %"less value"', 8)));
-  assert.equal(labelHover.trim(), '```llvm-ir\n(label) %"less value"\n```\n\n\n---\n\nLine 5 in @choose');
+  // Branch targets describe the block's place in the control flow and preview it.
+  assert.equal(labelHover.trim(), ['```llvm-ir\n(label) %"less value"\n```\n\n\n---\n\nPredecessors: `%entry`', 'Successors: `%done`',
+    'Immediate dominator: `%entry`, which every path here passes through.\n\n\n```llvm-ir\n"less value":\n  br label %done\n```\n\n\nLine 5 in @choose'].join('\n\n'));
   const parameterHover = hoverText(await vscode.commands.executeCommand('vscode.executeHoverProvider', blocks.uri, at(blocks, 'i32 %x', 5)));
   assert.equal(parameterHover.trim(), '```llvm-ir\n(parameter) %x: i32\n```\n\n\n---\n\nLine 1 in @choose');
   const blockFolds = await vscode.commands.executeCommand('vscode.executeFoldingRangeProvider', blocks.uri);
