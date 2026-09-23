@@ -1,5 +1,17 @@
 # Changes
 
+## 1.2.8 — fresher verification, faster checks, toolchain status
+
+- **Verify Workspace** no longer publishes stale results. A file that changes on disk, opens in an editor or leaves the index while `llvm-as` runs has its result thrown away. Cancelling or disposing the extension now stops the running `llvm-as` process instead of waiting for it to finish.
+- Dominance is computed from an immediate-dominator tree (Cooper, Harvey and Kennedy) instead of per-block dominator sets. Built-in checks of a 3,000-block straight-line function went from about 850 ms to about 35 ms.
+- Open documents are analyzed once per edit. The editor features and the workspace index share the analysis of identical text.
+- Language status items next to LLVM IR editors show:
+  - The `llvm-as` version in use, or why verification is unavailable: executable missing, not executable, timeout or crash.
+  - A warning when a module's `clang version` ident is newer than `llvm-as`, which usually means errors come from newer syntax.
+  - Whether the workspace index is in progress, complete or incomplete, with a Reindex action.
+- New **LLVM IR: Check LLVM Toolchain** command runs `llvm-as --version` again.
+- Verification warnings name the cause instead of a generic "unavailable" message.
+
 ## 1.2.7 — working with blocks
 
 - Block labels have their own theme color, `llvmIR.labelForeground`, with bold definitions. VS Code's themes color `entity.name.label` like plain text (`#C8C8C8` in Dark Modern), which hid the block structure of IR.

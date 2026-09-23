@@ -132,7 +132,9 @@ function compatibleModules(left, right) {
 }
 
 class WorkspaceIndex {
-  constructor() { this._documents = new Map(); this._metadata = new WeakMap(); this._modules = new WeakMap(); this._listeners = new Set(); }
+  // `analyze(text, uri)` may return an analysis the editor already computed
+  // for identical text, so an open document is analyzed once per edit.
+  constructor({ analyze: analyzer = analyze } = {}) { this._analyze = analyzer; this._documents = new Map(); this._metadata = new WeakMap(); this._modules = new WeakMap(); this._listeners = new Set(); }
   // Notifies after a snapshot is added, replaced or removed.
   onDidChange(listener) {
     this._listeners.add(listener);
@@ -140,7 +142,7 @@ class WorkspaceIndex {
   }
   _changed(uri) { for (const listener of this._listeners) listener(uri); }
   upsert(uri, text, { root, version } = {}) {
-    const document = { uri, root, text, version, analysis: analyze(text) };
+    const document = { uri, root, text, version, analysis: this._analyze(text, uri) };
     this._documents.set(uri, document);
     this._changed(uri);
     return document;

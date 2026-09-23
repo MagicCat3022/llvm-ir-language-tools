@@ -63,7 +63,8 @@ const mock = {
     onDidChangeVisibleTextEditors: () => ({ dispose() {} }), onDidChangeTextEditorSelection: () => ({ dispose() {} }), onDidChangeActiveTextEditor: () => ({ dispose() {} }),
     withProgress: (options, task) => task({ report() {} }, { isCancellationRequested: false }), showWarningMessage: message => { notifications.push(message); return new Promise(() => {}); }, showInformationMessage: message => { notifications.push(message); return new Promise(() => {}); }, createOutputChannel: () => ({ appendLine() {}, dispose() {} }) },
   commands: { registerCommand: (name, callback) => { registrations.set(name, callback); return { dispose() { registrations.delete(name); } }; } },
-  languages: { createDiagnosticCollection: collection }
+  LanguageStatusSeverity: { Information: 0, Warning: 1, Error: 2 },
+  languages: { createDiagnosticCollection: collection, createLanguageStatusItem: (id, selector) => ({ id, selector, dispose() {} }) }
 };
 for (const name of ['Hover', 'CompletionItem', 'SignatureHelp', 'Definition', 'Reference', 'Rename', 'DocumentSymbol', 'DocumentHighlight', 'DocumentFormattingEdit', 'DocumentSemanticTokens', 'FoldingRange', 'InlayHints', 'CodeLens', 'CodeActions']) {
   mock.languages[`register${name}Provider`] = (selector, provider, ...args) => { registrations.set(name, { selector, provider, args }); return { dispose() { registrations.delete(name); } }; };
@@ -977,6 +978,105 @@ test('Verify Workspace runs llvm-as on unopened files and summarizes failures', 
   mock.workspace.isTrusted = false;
   assert.match((await manager.verifyAll([{ uri: 'file:///a.ll', text: 'ok' }])).unavailable, /trusted/);
   manager.dispose();
+});
+
+test('Verify Workspace discards results for files that change, open or are disposed while llvm-as runs', async () => {
+  const published = collection(), pending = [];
+  const verifier = (text, options) => new Promise(resolve => pending.push({ text, options, resolve }));
+  const { positionsIn } = require('../src/check-manager');
+  const positions = text => positionsIn(mock, text);
+  const bad = { issues: [{ start: 0, end: 3, message: 'bad', severity: 'error' }] };
+  let manager = extension.createVerificationManager(published, { appendLine() {} }, verifier);
+  // Invalidated mid-run: the file changed on disk.
+  let run = manager.verifyAll([{ uri: 'file:///a.ll', text: 'bad' }], { positions });
+  await tick();
+  manager.forget(mock.Uri.parse('file:///a.ll'));
+  pending[0].resolve(bad);
+  assert.deepEqual(await run, { checked: 0, failed: 0 });
+  assert.equal(published.values.has('file:///a.ll'), false);
+  // The index replaced the snapshot while llvm-as ran.
+  run = manager.verifyAll([{ uri: 'file:///a.ll', text: 'bad' }], { positions, isCurrent: () => false });
+  await tick(); pending[1].resolve(bad); await run;
+  assert.equal(published.values.has('file:///a.ll'), false);
+  // Disposal aborts the running process and publishes nothing.
+  run = manager.verifyAll([{ uri: 'file:///a.ll', text: 'bad' }, { uri: 'file:///b.ll', text: 'bad' }], { positions });
+  await tick();
+  manager.dispose();
+  assert.equal(pending[2].options.signal.aborted, true);
+  pending[2].resolve(bad);
+  assert.equal((await run).cancelled, true);
+  assert.equal(published.values.size, 0);
+  assert.equal(pending.length, 3);
+  // Cancellation aborts the file being verified, not only later ones.
+  manager = extension.createVerificationManager(published, { appendLine() {} }, verifier);
+  let cancel;
+  const cancellation = { isCancellationRequested: false, onCancellationRequested: listener => { cancel = listener; return { dispose() {} }; } };
+  run = manager.verifyAll([{ uri: 'file:///a.ll', text: 'bad' }], { positions, cancellation });
+  await tick();
+  cancellation.isCancellationRequested = true; cancel();
+  assert.equal(pending[3].options.signal.aborted, true);
+  pending[3].resolve({ issues: [], cancelled: true });
+  assert.equal((await run).cancelled, true);
+  manager.dispose();
+});
+
+test('verification reports why llvm-as is unavailable', async () => {
+  const logs = [], results = [];
+  const verifier = async () => ({ issues: [], unavailable: 'Cannot run llvm-as: spawn llvm-as ENOENT', reason: 'missing' });
+  const manager = extension.createVerificationManager(collection(), { appendLine: line => logs.push(line) }, verifier, { onResult: result => results.push(result) });
+  const summary = await manager.verifyAll([{ uri: 'file:///a.ll', text: 'ok' }], { positions: () => () => new Position(0, 0) });
+  assert.equal(summary.reason, 'missing');
+  await manager.verify(document('ret void'));
+  assert.match(logs.at(-1), /not found/);
+  assert.match(notifications.at(-1), /not found/);
+  assert.equal(results.length, 2);
+  manager.dispose();
+});
+
+test('the status items show the llvm-as version, verification failures, version mismatches and index state', async () => {
+  const { createStatus } = require('../src/status');
+  const { WorkspaceIndex } = require('../src/workspace-index');
+  const items = new Map(), probes = [];
+  const languages = { ...mock.languages, createLanguageStatusItem: id => { const item = { id, dispose() {} }; items.set(id, item); return item; } };
+  const doc = document('ret void');
+  const vscode = { ...mock, languages, window: { ...mock.window, activeTextEditor: { document: doc } } };
+  const index = new WorkspaceIndex();
+  let state = { complete: false, reason: 'A relevant file exceeds workspace.maxFileBytes.' };
+  const workspace = { index, status: () => state, ready: async () => {} };
+  const status = createStatus(vscode, { workspace, output: { appendLine() {} }, probe: async executable => { probes.push(executable); return { version: { major: 15, text: '15.0.7' } }; } });
+  status.render();
+  const toolchain = items.get('llvmIR.toolchain'), indexing = items.get('llvmIR.index');
+  assert.equal(toolchain.busy, true);
+  await tick();
+  assert.equal(toolchain.text, 'LLVM 15.0.7');
+  assert.match(indexing.text, /incomplete/);
+  assert.equal(indexing.command.command, 'llvmIR.reindex');
+  status.report({ issues: [], unavailable: 'x', reason: 'timeout' }, '', doc.uri);
+  assert.match(toolchain.detail, /timed out/);
+  status.report({ issues: [{ severity: 'error' }] }, '!0 = !{!"clang version 18.1.3"}', doc.uri);
+  assert.match(toolchain.detail, /LLVM 18.*LLVM 15/);
+  status.report({ issues: [] }, '', doc.uri);
+  assert.equal(toolchain.severity, vscode.LanguageStatusSeverity.Information);
+  state = { complete: true };
+  status.render();
+  assert.match(indexing.text, /Indexed 0 files/);
+  assert.deepEqual(probes, ['llvm-as']);
+  status.dispose();
+});
+
+test('the workspace index reuses the editor analysis of identical text', () => {
+  const { WorkspaceIndex } = require('../src/workspace-index');
+  const analyses = new Map();
+  const index = new WorkspaceIndex({ analyze: (text, uri) => analyses.get(uri)?.text === text ? analyses.get(uri).value : require('../src/analysis').analyze(text) });
+  const workspace = { index, status: () => ({ complete: true }), ensure: async () => {}, ready: async () => {}, rootFor: () => 'r' };
+  const providers = extension.createProviders(analyses, workspace);
+  const doc = document(ir);
+  const local = providers.analyze(doc);
+  assert.equal(index.upsert(doc.uri.toString(), ir, { root: 'r', version: 1 }).analysis, local);
+  doc.version++; doc.text = ir + '\n';
+  const snapshot = index.upsert(doc.uri.toString(), doc.text, { root: 'r', version: 2 });
+  assert.equal(providers.analyze(doc), snapshot.analysis);
+  providers.dispose();
 });
 
 const loop = ['define i32 @count(i32 %n) {', 'entry:', '  br label %loop', 'loop:', '  %i = phi i32 [ 0, %entry ], [ %next, %body ]',

@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { courseFile, courseSkip } = require('./course-files');
-const { analyze, tokenAt, symbolAt, references, visibleSymbols, callAt, formatIR } = require('../src/analysis');
+const { dominatorTree, analyze, tokenAt, symbolAt, references, visibleSymbols, callAt, formatIR } = require('../src/analysis');
 
 const named = (analysis, name, scope) => analysis.symbols.find(entry => entry.name === name && (scope === undefined || entry.scope === scope));
 
@@ -238,4 +238,40 @@ test('formatter only changes edge whitespace and preserves CRLF and quoted bytes
   assert.ok(formatIR(text, { tabSize: 4 }).includes('\r\n    ret void'));
   const partial = '@s = constant [8 x i8] c"hello\n  literal  \nworld"\n';
   assert.equal(formatIR(partial), partial);
+});
+
+test('dominator trees match the dataflow definition, with unreachable blocks dominated by all', () => {
+  // Reference: the maximal fixpoint of dom(b) = {b} ∪ ⋂ dom(p) over predecessors.
+  const reference = (count, predecessors) => {
+    const sets = Array.from({ length: count }, (_, i) => new Set(i ? Array.from({ length: count }, (_, j) => j) : [0]));
+    for (let changed = true; changed;) {
+      changed = false;
+      for (let i = 1; i < count; i++) {
+        if (!predecessors[i].length) continue;
+        const next = new Set([i, ...[...sets[predecessors[i][0]]].filter(d => predecessors[i].every(p => sets[p].has(d)))]);
+        if (next.size !== sets[i].size) { sets[i] = next; changed = true; }
+      }
+    }
+    return sets;
+  };
+  let seed = 1;
+  const random = limit => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % limit; };
+  for (let trial = 0; trial < 500; trial++) {
+    const count = 1 + random(9), predecessors = Array.from({ length: count }, () => []);
+    for (let from = 0; from < count; from++) for (let k = random(3); k > 0; k--) predecessors[random(count)].push(from);
+    const expected = reference(count, predecessors), { dominators } = dominatorTree(count, predecessors);
+    for (let block = 0; block < count; block++) for (let d = 0; d < count; d++)
+      assert.equal(dominators[block].has(d), expected[block].has(d), `${JSON.stringify(predecessors)}: ${d} dom ${block}`);
+  }
+});
+
+test('checks of a long straight-line function stay fast', () => {
+  const { checkIR } = require('../src/checks');
+  let text = 'define i32 @f(i32 %x) {\nentry:\n  br label %b0\n';
+  for (let i = 0; i < 3000; i++) text += `b${i}:\n  %v${i} = add i32 ${i ? `%v${i - 1}` : '%x'}, 1\n  br label %b${i + 1}\n`;
+  text += 'b3000:\n  ret i32 %v2999\n}\n';
+  const started = performance.now();
+  assert.deepEqual(checkIR(analyze(text)), []);
+  // Quadratic dominator sets took about a second here; the tree takes tens of ms.
+  assert.ok(performance.now() - started < 1000, `${Math.round(performance.now() - started)} ms`);
 });

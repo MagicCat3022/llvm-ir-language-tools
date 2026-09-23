@@ -11,6 +11,7 @@ const { lookupLibrary, libraryParameters } = require('./library');
 const { checkIR } = require('./checks');
 const { createCheckManager, positionsIn } = require('./check-manager');
 const { createGraphView } = require('./cfg-view');
+const { createStatus, unavailableSummary } = require('./status');
 
 const selector = { language: 'llvm-ir' };
 const tokenTypes = ['function', 'variable', 'parameter', 'type', 'label', 'namespace', 'decorator'];
@@ -207,11 +208,15 @@ function canonicalName(name) {
 }
 
 function createProviders(cache = new Map(), workspace) {
+  // Reuses the workspace index's analysis of identical text, and vice versa
+  // (see sharedAnalyzer), so an edit is analyzed once for every consumer.
   const getAnalysis = document => {
     const key = document.uri.toString();
     let entry = cache.get(key);
     if (!entry || entry.version !== document.version) {
-      entry = { version: document.version, value: analysis.analyze(document.getText()) };
+      const text = document.getText(), snapshot = workspace?.index.get(key);
+      const value = entry?.text === text ? entry.value : snapshot?.text === text ? snapshot.analysis : analysis.analyze(text);
+      entry = { version: document.version, text, value };
       cache.set(key, entry);
     }
     return entry.value;
@@ -585,8 +590,12 @@ function createProviders(cache = new Map(), workspace) {
   return workspace ? attachWorkspaceProviders(vscode, providers, workspace, { markdown, paragraph, symbolDocumentation, signatureLabel }) : providers;
 }
 
-function createVerificationManager(collection, output, verifier = verifyIR, { onIssues } = {}) {
+function createVerificationManager(collection, output, verifier = verifyIR, { onIssues, onResult } = {}) {
   const states = new Map();
+  // Bumped whenever a file's published llvm-as results may become stale, so a
+  // workspace verification that finishes afterwards discards its result.
+  const generations = new Map(), workspaceRuns = new Set();
+  const bump = id => generations.set(id, (generations.get(id) || 0) + 1);
   const toDiagnostics = (issues, positionAt) => issues.map(issue => {
     const diagnostic = new vscode.Diagnostic(new vscode.Range(positionAt(issue.start), positionAt(issue.end)), issue.message, issue.severity === 'warning' ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Error);
     diagnostic.source = 'llvm-as';
@@ -606,6 +615,7 @@ function createVerificationManager(collection, output, verifier = verifyIR, { on
   const allowed = document => !disposed && !document.isClosed && document.languageId === 'llvm-ir' && vscode.workspace.isTrusted && config(document).get('diagnostics.enabled', true);
   const begin = document => {
     cancel(document);
+    bump(keyFor(document));
     collection.delete(document.uri);
     onIssues?.(document.uri, undefined);
     if (!allowed(document)) return undefined;
@@ -624,10 +634,11 @@ function createVerificationManager(collection, output, verifier = verifyIR, { on
     }
     if (disposed || states.get(keyFor(document)) !== state || document.version !== state.version || !allowed(document) || state.controller.signal.aborted) return { issues: [], cancelled: true };
     if (result.cancelled) return result;
+    onResult?.(result, document.getText(), document.uri);
     if (result.unavailable) {
       // Compiler stderr can contain source text; keep logs and notifications generic.
-      output.appendLine('LLVM verification unavailable. Check llvmIR.llvmAsPath, compiler compatibility, and the verification timeout.');
-      if (explicit) void vscode.window.showWarningMessage('LLVM verification unavailable. Check llvmIR.llvmAsPath and the LLVM IR Language Tools output.');
+      output.appendLine(`LLVM verification unavailable (${unavailableSummary(result)}). Check llvmIR.llvmAsPath, compiler compatibility, and the verification timeout.`);
+      if (explicit) void vscode.window.showWarningMessage(`LLVM verification unavailable: ${unavailableSummary(result)}. See the LLVM IR Language Tools output.`);
     } else {
       const positionAt = offset => document.positionAt(offset);
       collection.set(document.uri, toDiagnostics(result.issues, positionAt));
@@ -659,40 +670,67 @@ function createVerificationManager(collection, output, verifier = verifyIR, { on
     },
     close(document) { cancel(document); collection.delete(document.uri); onIssues?.(document.uri, undefined); },
     // Runs llvm-as on every indexed file, open ones from their editor text.
-    async verifyAll(entries, { positions, progress, cancellation } = {}) {
+    // Unopened files are verified from their index snapshot; `isCurrent(entry)`
+    // reports whether that snapshot still describes the file once llvm-as returns.
+    async verifyAll(entries, { positions, progress, cancellation, isCurrent = () => true } = {}) {
       const summary = { checked: 0, failed: 0 };
       if (!vscode.workspace.isTrusted) return { ...summary, unavailable: 'LLVM verification requires a trusted workspace.' };
-      const open = new Map(vscode.workspace.textDocuments.filter(document => document.languageId === 'llvm-ir' && !document.isClosed).map(document => [document.uri.toString(), document]));
-      for (const entry of entries) {
-        if (disposed || cancellation?.isCancellationRequested) return { ...summary, cancelled: true };
-        const uri = vscode.Uri.parse(entry.uri), document = open.get(entry.uri);
-        progress?.(uri);
-        if (!config(uri).get('diagnostics.enabled', true)) continue;
-        let result;
-        if (document) result = await run(document, begin(document), false);
-        else {
-          const settings = config(uri);
-          try { result = await verifier(entry.text, { executable: settings.get('llvmAsPath', 'llvm-as'), timeoutMs: settings.get('diagnostics.timeout', 5000) }); }
-          catch { result = { issues: [], unavailable: 'LLVM verification failed unexpectedly.' }; }
-          if (!result.unavailable && !result.cancelled) {
-            const positionAt = positions(entry.text);
-            collection.set(uri, toDiagnostics(result.issues, positionAt));
-            onIssues?.(uri, errorLines(result.issues, positionAt));
+      const controller = new AbortController();
+      workspaceRuns.add(controller);
+      const listener = cancellation?.onCancellationRequested?.(() => controller.abort());
+      const stopped = () => disposed || controller.signal.aborted || cancellation?.isCancellationRequested;
+      try {
+        const open = new Map(vscode.workspace.textDocuments.filter(document => document.languageId === 'llvm-ir' && !document.isClosed).map(document => [document.uri.toString(), document]));
+        for (const entry of entries) {
+          if (stopped()) return { ...summary, cancelled: true };
+          const uri = vscode.Uri.parse(entry.uri), document = open.get(entry.uri);
+          progress?.(uri);
+          if (!config(uri).get('diagnostics.enabled', true)) continue;
+          let result;
+          if (document && !document.isClosed) {
+            const state = begin(document);
+            // Workspace cancellation also stops the open document's llvm-as.
+            const abort = () => state?.controller.abort();
+            controller.signal.addEventListener('abort', abort, { once: true });
+            try { result = await run(document, state, false); } finally { controller.signal.removeEventListener('abort', abort); }
+          } else {
+            const settings = config(uri), generation = generations.get(entry.uri) || 0;
+            try { result = await verifier(entry.text, { executable: settings.get('llvmAsPath', 'llvm-as'), timeoutMs: settings.get('diagnostics.timeout', 5000), signal: controller.signal }); }
+            catch { result = { issues: [], unavailable: 'LLVM verification failed unexpectedly.', reason: 'failed' }; }
+            if (stopped()) return { ...summary, cancelled: true };
+            // The file changed, opened or was removed while llvm-as ran.
+            const fresh = (generations.get(entry.uri) || 0) === generation && !states.has(entry.uri) && isCurrent(entry);
+            if (!fresh) result = { issues: [], cancelled: true };
+            else if (!result.cancelled) onResult?.(result, entry.text, uri);
+            if (fresh && !result.unavailable && !result.cancelled) {
+              const positionAt = positions(entry.text);
+              collection.set(uri, toDiagnostics(result.issues, positionAt));
+              onIssues?.(uri, errorLines(result.issues, positionAt));
+            }
           }
+          if (stopped()) return { ...summary, cancelled: true };
+          if (result.unavailable) return { ...summary, unavailable: result.unavailable, reason: result.reason };
+          if (result.cancelled) continue;
+          summary.checked++;
+          if (result.issues.some(issue => issue.severity !== 'warning')) summary.failed++;
         }
-        if (result.unavailable) return { ...summary, unavailable: result.unavailable };
-        if (result.cancelled) continue;
-        summary.checked++;
-        if (result.issues.some(issue => issue.severity !== 'warning')) summary.failed++;
+        return summary;
+      } finally {
+        workspaceRuns.delete(controller);
+        listener?.dispose?.();
       }
-      return summary;
     },
     // Workspace results for an unopened file are stale once it changes on disk.
-    forget(uri) { if (!states.has(uri.toString())) { collection.delete(uri); onIssues?.(uri, undefined); } },
+    forget(uri) {
+      const id = uri.toString();
+      bump(id);
+      if (!states.has(id)) { collection.delete(uri); onIssues?.(uri, undefined); }
+    },
     dispose() {
       disposed = true;
       for (const state of states.values()) { clearTimeout(state.timer); state.controller.abort(); }
-      states.clear();
+      for (const controller of workspaceRuns) controller.abort();
+      states.clear(); workspaceRuns.clear();
       collection.clear();
     }
   };
@@ -736,18 +774,26 @@ function createLabelDecorations(analyze) {
   };
 }
 
+// The workspace index analyzes through this, reusing an editor analysis of the same text.
+const sharedAnalyzer = cache => (text, uri) => {
+  const entry = cache.get(uri);
+  return entry?.text === text ? entry.value : analysis.analyze(text);
+};
+
 let active;
 function activate(context) {
   if (active) active.dispose();
   const cache = new Map();
   const collection = vscode.languages.createDiagnosticCollection('llvm-ir');
   const output = vscode.window.createOutputChannel('LLVM IR Language Tools');
-  const workspace = createWorkspaceService(vscode, output, new WorkspaceIndex());
+  const workspace = createWorkspaceService(vscode, output, new WorkspaceIndex({ analyze: sharedAnalyzer(cache) }));
+  const status = createStatus(vscode, { workspace, output });
   const providers = createProviders(cache, workspace);
   const labels = createLabelDecorations(providers.analyze);
   const graphs = createGraphView(vscode, providers.analyze);
   const checks = createCheckManager(vscode, { collection: vscode.languages.createDiagnosticCollection('llvm-ir-checks'), analyze: providers.analyze, index: workspace.index });
-  const verification = createVerificationManager(collection, output, verifyIR, { onIssues: (uri, lines) => checks.setCompilerIssues(uri, lines) });
+  const verification = createVerificationManager(collection, output, verifyIR, { onIssues: (uri, lines) => checks.setCompilerIssues(uri, lines),
+    onResult: (result, text, uri) => status.report(result, text, uri) });
   const isOpen = uri => vscode.workspace.textDocuments.some(document => !document.isClosed && document.uri.toString() === uri);
   const indexListener = workspace.index.onDidChange(uri => { if (!isOpen(uri)) verification.forget(vscode.Uri.parse(uri)); });
   const positions = text => positionsIn(vscode, text);
@@ -756,12 +802,14 @@ function activate(context) {
     const entries = workspace.index.documents();
     if (!entries.length) return void vscode.window.showInformationMessage('No LLVM IR files are indexed in this workspace.');
     const summary = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Verifying LLVM IR', cancellable: true }, (progress, cancellation) =>
-      verification.verifyAll(entries, { positions, cancellation, progress: uri => progress.report({ message: vscode.workspace.asRelativePath(uri), increment: 100 / entries.length }) }));
-    if (summary.unavailable) void vscode.window.showWarningMessage(`${summary.unavailable} Built-in checks still run; see Problems.`);
+      verification.verifyAll(entries, { positions, cancellation, isCurrent: entry => workspace.index.get(entry.uri) === entry,
+        progress: uri => progress.report({ message: vscode.workspace.asRelativePath(uri), increment: 100 / entries.length }) }));
+    if (summary.unavailable) void vscode.window.showWarningMessage(`${summary.reason ? unavailableSummary(summary) + '.' : summary.unavailable} Built-in checks still run; see Problems.`);
     else void vscode.window.showInformationMessage(`LLVM verification${summary.cancelled ? ' cancelled after' : ':'} ${summary.checked} file${summary.checked === 1 ? '' : 's'} checked, ${summary.failed} with errors.`);
     return summary;
   };
-  const subscriptions = [providers, workspace, verification, checks, labels, graphs, indexListener, collection, output,
+  const subscriptions = [providers, workspace, verification, checks, labels, graphs, status, indexListener, collection, output,
+    vscode.commands.registerCommand('llvmIR.checkToolchain', () => status.check()),
     vscode.commands.registerCommand('llvmIR.showControlFlowGraph', (uri, offset) => graphs.show(uri instanceof vscode.Uri ? uri : undefined, Number.isInteger(offset) ? offset : undefined)),
     vscode.window.onDidChangeTextEditorSelection(event => graphs.follow(event.textEditor)),
     vscode.window.onDidChangeActiveTextEditor(editor => graphs.follow(editor)),
@@ -783,16 +831,17 @@ function activate(context) {
     vscode.languages.registerCodeActionsProvider(selector, providers.codeActions, { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }),
     vscode.commands.registerCommand('llvmIR.verifyWorkspace', verifyWorkspace),
     vscode.commands.registerCommand('llvmIR.verify', () => verification.verify(vscode.window.activeTextEditor?.document)),
-    vscode.commands.registerCommand('llvmIR.reindex', async () => { await workspace.start(); await workspace.rescan(); await workspace.ready(); }),
+    vscode.commands.registerCommand('llvmIR.reindex', async () => { await workspace.start(); const scan = workspace.rescan(); status.render(); await scan; await workspace.ready(); status.render(); }),
     vscode.workspace.onDidOpenTextDocument(document => { verification.schedule(document); checks.schedule(document, true); }),
     vscode.workspace.onDidChangeTextDocument(event => { verification.schedule(event.document); checks.schedule(event.document); labels.schedule(event.document); graphs.changed(event.document); }),
     vscode.workspace.onDidSaveTextDocument(document => verification.schedule(document, true)),
     vscode.workspace.onDidCloseTextDocument(document => { verification.close(document); checks.close(document); cache.delete(document.uri.toString()); }),
-    vscode.workspace.onDidGrantWorkspaceTrust(() => { for (const document of vscode.workspace.textDocuments) verification.schedule(document, true); }),
+    vscode.workspace.onDidGrantWorkspaceTrust(() => { status.render(); for (const document of vscode.workspace.textDocuments) verification.schedule(document, true); }),
     vscode.workspace.onDidChangeConfiguration(event => {
       if (!event.affectsConfiguration('llvmIR')) return;
       providers.refresh();
       checks.refresh();
+      if (event.affectsConfiguration('llvmIR.llvmAsPath')) status.reset(); else status.schedule();
       labels.refresh();
       for (const document of vscode.workspace.textDocuments) verification.schedule(document);
     })
@@ -802,7 +851,8 @@ function activate(context) {
   context.subscriptions.push(active);
   for (const document of vscode.workspace.textDocuments) { verification.schedule(document); checks.schedule(document, true); }
   labels.refresh();
-  void workspace.start().catch(() => output.appendLine('Workspace indexing failed. Run LLVM IR: Reindex Workspace to retry.'));
+  status.render();
+  void workspace.start().then(() => workspace.ready()).then(() => status.render(), () => output.appendLine('Workspace indexing failed. Run LLVM IR: Reindex Workspace to retry.'));
   return { verify: document => verification.verify(document), verifyWorkspace };
 }
 
