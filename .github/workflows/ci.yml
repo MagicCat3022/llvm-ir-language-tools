@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Unit tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # VS Code 1.85, the oldest release package.json supports, runs extensions on Node 18.
+        node: [18, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      # Real llvm-as runs the verifier tests that are otherwise skipped.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends llvm
+      - run: llvm-as --version
+      - run: npm ci
+      - run: npm test
+
+  integration:
+    name: VS Code ${{ matrix.vscode }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest release package.json supports, and the newest.
+        vscode: ['1.85.0', stable]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends llvm xvfb
+      - run: npm ci
+      - uses: actions/cache@v4
+        with:
+          path: .vscode-test
+          key: vscode-${{ runner.os }}-${{ matrix.vscode }}-${{ matrix.vscode == 'stable' && github.run_id || 'pinned' }}
+          restore-keys: vscode-${{ runner.os }}-${{ matrix.vscode }}-
+      - run: xvfb-run -a npm run test:integration
+        env:
+          VSCODE_VERSION: ${{ matrix.vscode }}
+
+  package:
+    name: Package VSIX
+    runs-on: ubuntu-latest
+    needs: [unit, integration]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: '*.vsix'
+          if-no-files-found: error
