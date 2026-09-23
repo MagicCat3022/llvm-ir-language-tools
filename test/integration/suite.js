@@ -130,8 +130,10 @@ async function run() {
   const argumentNames = hints.filter(hint => hint.kind === vscode.InlayHintKind.Parameter).map(hint => typeof hint.label === 'string' ? hint.label : hint.label.map(part => part.value).join(''));
   assert.deepEqual(argumentNames, ['left:', 'right:'], 'call arguments are named after parameters');
   const lenses = await vscode.commands.executeCommand('vscode.executeCodeLensProvider', document.uri, 10);
-  const sumLens = lenses.find(lens => lens.range.start.line === 2);
-  assert.equal(sumLens?.command?.title, '1 reference', 'reference CodeLens counts the call in @main');
+  // A definition carries both a reference count and a control-flow graph link.
+  const sumLenses = lenses.filter(lens => lens.range.start.line === 2).map(lens => lens.command?.title);
+  assert.ok(sumLenses.includes('1 reference'), `reference CodeLens counts the call in @main: ${sumLenses}`);
+  assert.ok(sumLenses.includes('Control-flow graph'), `definitions link to their control-flow graph: ${sumLenses}`);
   const branchCompletion = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', document.uri, at(document, 'i32 %right', 4));
   assert.ok(branchCompletion.items.every(item => !String(typeof item.label === 'string' ? item.label : item.label.label).startsWith('@')), 'an i32 operand excludes pointer globals');
   const formatted = await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', document.uri, { tabSize: 4, insertSpaces: true });
