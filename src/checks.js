@@ -45,7 +45,16 @@ const comparable = type => type && type !== 'unknown' && !/["*]/.test(type);
 const sameType = (left, right) => left === right || /^%/.test(left) && /^%/.test(right) && canonicalName(left) === canonicalName(right);
 const pointer = type => /^ptr(?: addrspace\(\d+\))?$/.test(type || '');
 
+// Diagnostics and code actions check the same analysis; compute it once.
+// Callers only read the result.
+const checked = new WeakMap();
 function checkIR(analysis) {
+  let issues = checked.get(analysis);
+  if (!issues) checked.set(analysis, issues = computeIssues(analysis));
+  return issues;
+}
+
+function computeIssues(analysis) {
   const issues = [];
   const { code, statements, definitions, typeOffsets, blockaddressTargets } = analysis._index;
   const text = analysis.text;

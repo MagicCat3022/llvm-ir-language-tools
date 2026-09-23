@@ -1,5 +1,20 @@
 # Changes
 
+## 1.2.9 — large files
+
+Measured on real clang output: a C++ module using `<regex>`, `<map>` and `<sstream>`. The totals below are the cost of one keystroke across every editor feature.
+
+| Module | 1.2.8 | 1.2.9 |
+|---|---|---|
+| `-O2`, 1.7 MB | 2.2 s | 0.48 s |
+| `-O0`, 3.7 MB | 19.5 s | 0.96 s |
+
+- Local names resolve through an index by function and name. Clang reuses names such as `%0` and `%this.addr` in every function, so each lookup had scanned one candidate per function. That made built-in checks, semantic tokens, label colors and references quadratic.
+- Document symbols group each function's locals once, instead of filtering every symbol for each function.
+- Code actions reuse the built-in check results for the same text, instead of running every check again when the cursor moves.
+- Completion in a `define` or `declare` parameter list offers types (including named types) at the start of a parameter, and parameter attributes after its type. It no longer offers existing values or instructions there.
+- `npm run bench` prints the per-keystroke cost of each feature for any IR files. A test keeps name resolution linear.
+
 ## 1.2.8 — fresher verification, faster checks, toolchain status
 
 - **Verify Workspace** no longer publishes stale results. A file that changes on disk, opens in an editor or leaves the index while `llvm-as` runs has its result thrown away. Cancelling or disposing the extension now stops the running `llvm-as` process instead of waiting for it to finish.

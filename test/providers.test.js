@@ -1079,6 +1079,57 @@ test('the workspace index reuses the editor analysis of identical text', () => {
   providers.dispose();
 });
 
+test('whole-document features stay fast when every function reuses local names', () => {
+  // Clang's -O0 output names %0, %1 and %this.addr in every function. Resolving
+  // by name alone scanned one candidate per function, for every token.
+  let text = '';
+  for (let i = 0; i < 2000; i++) text += `define i32 @f${i}(ptr %this, i32 %0) {\n  %this.addr = alloca ptr\n  store ptr %this, ptr %this.addr\n  %2 = add i32 %0, 1\n  br label %3\n3:\n  ret i32 %2\n}\n`;
+  // document()'s positionAt splits the whole text, which would time the test itself.
+  const doc = document(text), starts = [0];
+  for (let i = 0; i < text.length; i++) if (text[i] === '\n') starts.push(i + 1);
+  doc.positionAt = offset => {
+    let low = 0, high = starts.length - 1;
+    while (low < high) { const middle = (low + high + 1) >>> 1; if (starts[middle] <= offset) low = middle; else high = middle - 1; }
+    return new Position(low, offset - starts[low]);
+  };
+  doc.offsetAt = position => starts[position.line] + position.character;
+  const providers = extension.createProviders();
+  const started = performance.now();
+  providers.semantic.provideDocumentSemanticTokens(doc);
+  providers.symbols.provideDocumentSymbols(doc);
+  require('../src/checks').checkIR(providers.analyze(doc));
+  providers.codeActions.provideCodeActions(doc, new Range(new Position(3, 2), new Position(3, 2)), { diagnostics: [] });
+  // Quadratic resolution took several seconds here; linear takes tens of ms.
+  assert.ok(performance.now() - started < 1500, `${Math.round(performance.now() - started)} ms`);
+  providers.dispose();
+});
+
+test('parameter lists complete types, then attributes, never existing values', () => {
+  const providers = extension.createProviders();
+  const complete = (source, typed = '') => {
+    const at = source.indexOf('|'), doc = document(source.replace('|', typed));
+    return providers.completion.provideCompletionItems(doc, doc.positionAt(at + typed.length)).map(item => item.label);
+  };
+  const body = ') {\nentry:\n  ret i32 0\n}\n';
+  const header = '%S = type { i32 }\n@g = global i32 0\ndefine i32 @f(';
+  for (const start of [header + '|' + body, header + 'i32 %a, |' + body]) {
+    const labels = complete(start);
+    assert.ok(labels.includes('i32') && labels.includes('ptr') && labels.includes('%S'), labels.join(' '));
+    assert.ok(!labels.some(label => ['@g', '@f', '%entry', '%a', 'add', 'ret', 'noundef'].includes(label)), labels.join(' '));
+  }
+  assert.deepEqual(complete(header + '|' + body, '%'), ['%S']);
+  for (const afterType of [header + 'i32 |' + body, header + 'ptr align(8) |' + body, 'declare i32 @printf(ptr noundef |, ...)\n']) {
+    const labels = complete(afterType);
+    assert.ok(labels.includes('noundef') && labels.includes('nonnull'), labels.join(' '));
+    assert.ok(!labels.some(label => /^[%@]/.test(label) || label === 'i32' || label === 'add'), labels.join(' '));
+  }
+  // Naming a new parameter: nothing to suggest.
+  assert.deepEqual(complete(header + 'i32 noundef |' + body, '%'), []);
+  // Operands in the body are unaffected.
+  assert.deepEqual(complete('define i32 @f(i32 %a, i32 %b) {\nentry:\n  %x = add i32 %a, |\n  ret i32 0\n}\n'), ['%a', '%b', 'poison', 'undef']);
+  providers.dispose();
+});
+
 const loop = ['define i32 @count(i32 %n) {', 'entry:', '  br label %loop', 'loop:', '  %i = phi i32 [ 0, %entry ], [ %next, %body ]',
   '  %c = icmp slt i32 %i, %n', '  br i1 %c, label %body, label %done', 'body:', '  %next = add i32 %i, 1', '  br label %loop',
   'done:                                             ; preds = %loop', '  ret i32 %i', 'dead:', '  ret i32 0', '}'].join('\n');

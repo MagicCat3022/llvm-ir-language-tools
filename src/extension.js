@@ -262,6 +262,11 @@ function createProviders(cache = new Map(), workspace) {
   // predicates, or available values of the expected type (best matches first).
   function contextCompletions(document, parsed, context, offset, sigil, range) {
     if (context.kind === 'label') return sigil && sigil !== '%' ? [] : context.labels.map(label => symbolItem(label, document, range));
+    // A parameter list declares new names: offer types, then attributes, never existing values.
+    if (context.kind === 'parameter') {
+      if (context.expect === 'attribute') return sigil ? [] : context.attributes.map(word => keywordItem(word, range));
+      return [...(sigil && sigil !== '%' ? [] : context.named.map(type => symbolItem(type, document, range))), ...(sigil ? [] : context.types.map(word => keywordItem(word, range)))];
+    }
     if (context.kind === 'predicate') return sigil ? [] : context.predicates.map((word, i) => {
       const item = keywordItem(word, range);
       item.kind = vscode.CompletionItemKind.EnumMember;
@@ -387,9 +392,12 @@ function createProviders(cache = new Map(), workspace) {
       const create = symbol => new vscode.DocumentSymbol(symbol.name,
         ['label', 'metadata', 'attribute'].includes(symbol.kind) || symbol.type === 'unknown' ? '' : symbol.type, symbolKind(symbol.kind),
         spanRange(document, { start: Math.min(symbol.fullStart, symbol.start), end: Math.max(symbol.fullEnd, symbol.end) }), spanRange(document, symbol));
+      // Group locals by function once; filtering all symbols per function is quadratic.
+      const locals = new Map();
+      for (const symbol of parsed.symbols) if (symbol.scope !== null) (locals.get(symbol.scope) || locals.set(symbol.scope, []).get(symbol.scope)).push(symbol);
       return parsed.symbols.filter(symbol => symbol.scope === null).map(symbol => {
         const result = create(symbol);
-        if (symbol.kind === 'function') result.children = parsed.symbols.filter(child => child.scope === symbol.name && child.start >= symbol.fullStart && child.end <= symbol.fullEnd).map(create);
+        if (symbol.kind === 'function') result.children = (locals.get(symbol.name) || []).filter(child => child.start >= symbol.fullStart && child.end <= symbol.fullEnd).map(create);
         return result;
       });
     }
