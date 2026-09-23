@@ -293,6 +293,12 @@ cross-file references/rename, collisions, exclusions, library hovers and dirty b
 `VSCODE_VERSION=1.85.0 npm run test:integration` tests a specific release; CI runs
 1.85.0 (the oldest supported) and the latest.
 
+To release, bump `version` in `package.json`, add its `## X.Y.Z` section to
+`CHANGELOG.md`, and push a matching `vX.Y.Z` tag. The Release workflow checks that
+the tag and version agree, runs the unit tests, and publishes a GitHub Release with
+the VSIX attached and that changelog section as notes. To publish an existing tag,
+run the workflow from the Actions tab with the tag name.
+
 To measure what one keystroke costs in each editor feature, run the benchmark on
 any IR files, for example clang output (`clang -S -emit-llvm`):
 
