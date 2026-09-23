@@ -10,6 +10,8 @@
   - A warning when a module's `clang version` ident is newer than `llvm-as`, which usually means errors come from newer syntax.
   - Whether the workspace index is in progress, complete or incomplete, with a Reindex action.
 - New **LLVM IR: Check LLVM Toolchain** command runs `llvm-as --version` again.
+- Workspace indexing works on VS Code 1.85 again. Its ripgrep rejected the nested `{}` groups in the combined exclude pattern, so no files were indexed.
+- CI runs the unit tests on Node 18 and 22 with a real `llvm-as`, and the integration tests in VS Code 1.85.0 and the latest release.
 - Verification warnings name the cause instead of a generic "unavailable" message.
 
 ## 1.2.7 — working with blocks
