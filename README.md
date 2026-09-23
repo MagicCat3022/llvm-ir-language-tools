@@ -1,61 +1,40 @@
-# LLVM IR Language Tools (Local)
+# LLVM IR Language Tools
 
-A local extension for editing LLVM IR, built on the original LLVM IR Highlighter
-grammar. Supports `.ll` and `.llvm`. Extension ID: `cse4100-local.llvm-ir-highlighter`.
+Language support for LLVM IR (`.ll`, `.llvm`) in VS Code: hovers that explain values,
+instructions and control flow; completion that knows what is valid where; checks as
+you type, with no LLVM installation needed; cross-file navigation and rename; and a
+control-flow graph of each function.
 
-## Features
+<img src="docs/media/overview.png" width="780" alt="A function in the editor with block labels in bold orange, type hints after SSA values, predecessor hints after labels, and a CodeLens with its reference count and a control-flow graph link">
 
-- Hovers follow the Python/Pylance layout: a `(kind) signature` code block, a divider, then documentation and context. Kinds are `function`, `parameter`, `variable`, `label`, `global`, `type`, `metadata`, `attributes`, `instruction`, `keyword`, and `attribute`.
-- Hover SSA values as `(variable) %name: type = expression` and parameters as `(parameter) %name: type`, with the definition line and owning function below the divider.
-- Pointer hovers and inlay hints show what an opaque `ptr` refers to, as `ptr → pointee`. A trailing `?` marks a hint inferred from uses rather than stated by the instruction, and the hover adds one `pointee — reason` line for it:
-  - GEP results address a member: `%t1: ptr → i32`, with `` `i32` — field 1 of `%Class_Dog` ``.
-  - Stack slots show what they hold: `%a_ptr: ptr → ptr → %Class_Dog?`.
-  - Pointers take the type a GEP indexes them as, including through a direct call or a stack slot: `%a_obj: ptr → %Class_Dog?`.
-  - A load from an object field whose only stored value is a global's address points to that global (`%a_vtbl: ptr → @dogVTBL?`), and a load from a constant table resolves the entry (`%a.makeNoise_method: ptr → @dog_makeNoise?`), so indirect vtable calls name their likely target. `→ @g` means the pointer holds the address of `@g`; it never means the value is `@g`'s contents.
-  - The first `ptr` parameter of a function listed in such a table (a vtable method) shows its likely receivers: `%this: ptr → %Class_Animal | %Class_Dog?`.
-- Label hovers give the block's predecessors, successors, loop role (`Loop header: %body branches back here.`) and immediate dominator; hovering a branch target also previews that block.
-- **LLVM IR: Show Control-Flow Graph** (editor title button, context menu, or the `Control-flow graph` CodeLens above each function) opens a graph of the function's blocks that follows the cursor. T/F mark conditional edges, dashed edges loop back, unreachable blocks are dimmed, and clicking a block jumps to it.
-- Predecessor inlay hints after each block label (`preds: %entry, %body`), each clickable, unless a clang `; preds` comment is already there.
-- Hover globals (`(global) @name: type = ...`), named types, metadata, and attribute groups for one source preview and location.
-- Hover functions for a single `(function)` signature with return/parameter types, names, attributes, and variadic arguments—without a repeated `define`/`declare`.
-- Hover instructions for their operand syntax as the signature (alternative forms on separate lines), followed by an explanation and LLVM reference link. Comparison hovers include all `icmp`/`fcmp` predicates and their meanings.
-- Library hovers list `@param` and `@returns` documentation, notes, and a reference link, then any cross-file declaration/definition locations.
-- Context-aware completion: block labels after `label` and in `phi` incoming slots (never the entry block), predicates after `icmp`/`fcmp`, and operands that match the expected type and are available in SSA form (parameters and results whose definition dominates the use). Call arguments without a type complete as `i32 %x`. Elsewhere, local symbols and LLVM keywords are offered.
-- Completing a symbol from another workspace file adds the matching `declare` (or `@g = external global …`) line, like an auto-import. The declaration is copied from the definition. It is added only when every compatible definition agrees and needs no named types; otherwise only the name is inserted.
-- Signature help when entering arguments to known functions.
-- Go to definition, find references, highlight occurrences, and rename named symbols.
-- Navigate declarations to compatible definitions in other files, find cross-file references, and search workspace symbols.
-- Conservative cross-file rename with linkage, ambiguity, ABI, collision, and stale-file checks.
-- Offline documentation for 20 C-library functions (including `printf`) and 24 LLVM intrinsic families, with format guidance and parameter help.
-- Document outline, function/basic-block folding, and conservative indentation formatting.
-- Parameter-name inlay hints before call arguments (`call i32 @sum(left: i32 2, right: i32 3)`), from the callee's parameter names or, for unnamed library declarations such as `declare i32 @printf(ptr, ...)`, the documented names. Arguments already named like the parameter get no hint.
-- A reference-count CodeLens (`N references`) above functions, globals, and named types. Counts include other workspace files when indexing is enabled; click to peek them.
-- Semantic symbol coloring and SSA type inlay hints (on by default; disable with `llvmIR.inlayHints.enabled`). Pointer hints append their inferred pointee (`: ptr → i32`, `: ptr → ptr → %Class_Dog?` for a slot, `: ptr → @dog_makeNoise?`, `ptr %this: ptr → %Class_Dog?`). A trailing `?` marks a hint inferred from uses rather than stated by the instruction; the tooltip gives the qualified explanation.
-- Built-in diagnostics while you type, with no LLVM installation needed (see [Built-in diagnostics](#built-in-diagnostics)), plus quick fixes for misspelled names, missing declarations and variadic calls.
-- Verify current, including unsaved, IR with `llvm-as` in the Problems panel, or every indexed file with **LLVM IR: Verify Workspace**.
-- The language status area (`{}` in the status bar) shows the `llvm-as` version, why verification is unavailable, and whether the workspace index is complete. **LLVM IR: Check LLVM Toolchain** checks `llvm-as` again.
+Extension ID: `cse4100-local.llvm-ir-highlighter`. Everything runs locally and offline.
 
-Block labels get their own themeable color (`llvmIR.labelForeground`), with
-definitions in bold, including quoted and numeric labels. Each labeled basic block folds independently, leaving its label
-visible. TextMate highlighting, brackets, comments, and region folding remain.
-Editing features work offline without LLVM installed. This version executes local
-JavaScript to provide language services.
+**Contents:** [Install](#install) ·
+[Understand IR](#understand-ir) · [Write IR](#write-ir) · [Catch mistakes](#catch-mistakes) ·
+[Navigate and refactor](#navigate-and-refactor) · [See control flow](#see-control-flow) ·
+[Settings](#settings) · [Reference](#reference) · [Develop and test](#develop-and-test)
 
 ## Install
 
-From the repository root:
+1. Download the `.vsix` from the [latest release](https://github.com/MagicCat3022/llvm-ir-language-tools/releases/latest),
+   under **Assets**. Or, with the [GitHub CLI](https://cli.github.com/):
 
-```sh
-npm ci --ignore-scripts
-npm test
-npm run package
-code --install-extension ./llvm-ir-language-tools-1.2.9.vsix
-```
+   ```sh
+   gh release download --repo MagicCat3022/llvm-ir-language-tools --pattern '*.vsix'
+   ```
 
-Alternatively use **Extensions → … → Install from VSIX**. Disable
-`qiu.llvm-ir-language-support` and any original `leoapagano.llvm-ir-highlighter`
-in this workspace, then reload. They register the same language and can supply
-competing providers or grammars.
+2. Install it: in VS Code, open the Extensions view, choose **… → Install from VSIX…**, and
+   pick the file. Or, from a terminal in the download folder:
+
+   ```sh
+   code --install-extension llvm-ir-language-tools-*.vsix
+   ```
+
+3. Reload VS Code. To update later, install a newer `.vsix` the same way.
+
+Disable `qiu.llvm-ir-language-support` and any original
+`leoapagano.llvm-ir-highlighter` in this workspace, then reload. They register the
+same language and can supply competing providers or grammars.
 
 Merge this association into your existing workspace settings:
 
@@ -70,8 +49,145 @@ Merge this association into your existing workspace settings:
 An existing association to `"llvm"` overrides recognition: `llvm` is an alias,
 whereas `llvm-ir` is the registered language ID.
 
-Open `samples/language-features.ll` to try the new features. The original
-`samples/example.ll` remains a highlighting fixture, not a compiler-validity test.
+To try the features, open
+[`samples/language-features.ll`](samples/language-features.ll) from this repository.
+The original `samples/example.ll` remains a highlighting fixture, not a
+compiler-validity test.
+
+## Understand IR
+
+**Hover anything** for a signature in the style of Python's Pylance: a `(kind) signature`
+line, then documentation and context.
+
+SSA values show their type, definition and location:
+
+<img src="docs/media/hover-variable.png" width="496" alt="Hover on %updated showing (variable) %updated: i32 = add i32 %total, %i and Line 18 in @sum_to">
+
+Instructions show their syntax, an explanation and a link to the LLVM Language
+Reference. Comparisons list every predicate:
+
+<img src="docs/media/hover-instruction.png" width="919" alt="Hover on icmp showing its two syntax forms, an explanation, and a table of the ten integer comparison predicates">
+
+Branch targets describe the block's place in the control flow (predecessors, successors,
+loop header, immediate dominator) and preview it:
+
+<img src="docs/media/hover-label.png" width="908" alt="Hover on the branch target %body showing its predecessors and successors, its immediate dominator %loop, and a preview of the body block">
+
+C library functions and LLVM intrinsics have offline documentation: parameters, return
+value, notes, and for `printf` the format conversions (top of the hover shown):
+
+<img src="docs/media/hover-library.png" width="987" alt="Hover on @printf showing its summary, @param and @returns documentation, ABI notes, and the start of the conversion table">
+
+**Pointers say what they point to.** Opaque `ptr` values get a pointee when the file
+determines it, with `?` marking an inference and the hover giving the reason, even
+through a vtable:
+
+<img src="docs/media/hover-pointer.png" width="805" alt="Hover on %method showing ptr → @dog_makeNoise? because it holds the address in element 0 of @dogVTBL, with pointer inlay hints on the surrounding lines">
+
+**Inlay hints** show the type of every SSA value (`: i32`), each block's predecessors
+(`preds: %entry, %body`), and parameter names at call sites, including the documented
+names of library functions such as `printf`:
+
+<img src="docs/media/inlay-parameters.png" width="805" alt="Calls in @main with parameter-name hints: n:, value:, low:, high:, a:, b: and format:">
+
+Also:
+
+- Hovers on globals, named types, metadata and attribute groups show their definition;
+  function hovers show one `(function)` signature with parameter names and attributes.
+- Library help covers 20 C library functions (including `printf`) and 24 LLVM intrinsic
+  families, with format guidance and parameter help. No network requests are made.
+- Semantic coloring distinguishes functions, globals, local values, parameters, types and
+  labels.
+
+<details>
+<summary>How pointer hints are inferred</summary>
+
+Pointer hovers and inlay hints show what an opaque `ptr` refers to, as `ptr → pointee`. A trailing `?` marks a hint inferred from uses rather than stated by the instruction, and the hover adds one `pointee — reason` line for it:
+
+- GEP results address a member: `%t1: ptr → i32`, with `` `i32` — field 1 of `%Class_Dog` ``.
+- Stack slots show what they hold: `%a_ptr: ptr → ptr → %Class_Dog?`.
+- Pointers take the type a GEP indexes them as, including through a direct call or a stack slot: `%a_obj: ptr → %Class_Dog?`.
+- A load from an object field whose only stored value is a global's address points to that global (`%a_vtbl: ptr → @dogVTBL?`), and a load from a constant table resolves the entry (`%a.makeNoise_method: ptr → @dog_makeNoise?`), so indirect vtable calls name their likely target. `→ @g` means the pointer holds the address of `@g`; it never means the value is `@g`'s contents.
+- The first `ptr` parameter of a function listed in such a table (a vtable method) shows its likely receivers: `%this: ptr → %Class_Animal | %Class_Dog?`.
+
+<img src="docs/media/hover-receiver.png" width="677" alt="Hover on the %this parameter of @dog_makeNoise showing ptr → %Class_Dog? because @dog_makeNoise is listed in @dogVTBL">
+
+</details>
+
+## Write IR
+
+**Completion knows what fits.** Where an operand goes, it offers only values of the
+expected type whose definition is available (dominates the use):
+
+<img src="docs/media/complete-operands.gif" width="760" alt="Typing %double = add i32 % in a loop body: completion offers only i32 values available there, and %updated is chosen">
+
+After `label` and in `phi` incoming slots it offers the function's blocks (never the
+entry block); after `icmp`/`fcmp`, the predicates:
+
+<img src="docs/media/complete-labels.gif" width="640" alt="Typing br label % offers the blocks %body, %exit and %loop; choosing %loop updates its preds hint">
+
+**Signature help** follows the argument you are typing:
+
+<img src="docs/media/signature-help.gif" width="760" alt="Typing a call to @clamp shows its signature with the active parameter highlighted as each comma is typed">
+
+**Functions from other files** complete like an auto-import: choosing one adds the
+matching `declare` line, copied from the definition:
+
+<img src="docs/media/complete-cross-file.gif" width="800" alt="Typing @squ offers @square from math.ll; accepting it inserts declare i32 @square(i32) at the top of main.ll">
+
+Formatting fixes indentation, and each function and basic block folds on its own,
+keeping the label visible:
+
+<img src="docs/media/folding.gif" width="720" alt="Folding the loop, body and exit blocks one after another, each label and its preds hint staying visible, then unfolding">
+
+## Catch mistakes
+
+**Built-in checks run as you type, with no LLVM installation:** undefined and duplicate
+names, broken block structure, dominance, type mismatches, wrong call signatures,
+and unused values (faded):
+
+<img src="docs/media/diagnostics.png" width="1047" alt="A file with errors: an undefined %summ with the message Did you mean %sum?, a use of %a its definition does not dominate, a warning on a variadic printf call, and faded unused values">
+
+Quick fixes correct misspelled names, spell the function type that variadic calls
+need, and add missing declarations:
+
+<img src="docs/media/quickfix-typo.gif" width="680" alt="Quick Fix on %summ offers Change to %sum; accepting it clears the error">
+
+<img src="docs/media/quickfix-variadic.gif" width="820" alt="Quick Fix on the printf warning inserts the function type (ptr, ...) into the call">
+
+With LLVM installed, `llvm-as` also verifies each file as you edit (or on demand with
+**LLVM IR: Verify Document** and **LLVM IR: Verify Workspace**). The `{ }` language
+status in the status bar shows which LLVM version verifies, why verification is
+unavailable if it is, and whether the workspace index is complete:
+
+<img src="docs/media/status.png" width="412" alt="The language status popup: Indexed 4 files, workspace index is complete, and LLVM 22.1.2, verifying with llvm-as">
+
+See [the full list of checks](#built-in-checks) under Reference.
+
+## Navigate and refactor
+
+- **Go to Definition**, **Find All References**, occurrence highlighting, and the
+  document outline, across files: a `declare` leads to its definition in another file.
+- **Rename** local values, blocks, globals and functions; cross-file renames are checked
+  for linkage, collisions and stale files before anything changes:
+
+<img src="docs/media/rename.gif" width="1042" alt="Renaming @gcd to @euclid with F2 updates the declaration and call in main.ll and the definition in math.ll">
+
+- A **reference count** above each function, global and named type; click it to peek
+  the references.
+- **Workspace symbol search** (Ctrl+T) over every indexed file.
+
+## See control flow
+
+**LLVM IR: Show Control-Flow Graph** (the `Control-flow graph` CodeLens, the editor
+title button, or the context menu) opens a graph of the function beside the editor.
+`T`/`F` mark conditional edges, dashed edges loop back, unreachable blocks are dimmed,
+the highlight follows your cursor, and clicking a block jumps to it:
+
+<img src="docs/media/cfg.gif" width="1010" alt="The control-flow graph of @sum_to beside the editor: the highlighted block follows the cursor through loop and body, and clicking %exit jumps to that label">
+
+Block labels get their own color and bold definitions, so the structure of a function
+stands out (see [Label color](#label-color)).
 
 ## Settings
 
@@ -99,7 +215,10 @@ Open `samples/language-features.ll` to try the new features. The original
 | `llvmIR.workspace.maxTotalBytes` | `33554432` | Source-byte limit per workspace folder |
 | `llvmIR.workspace.projectRoots` | `[]` | Independent linkage projects within a workspace folder |
 
-## Cross-file support and library help
+## Reference
+
+<details>
+<summary><strong>Cross-file support and library help</strong></summary>
 
 The index discovers unopened `.ll` and `.llvm` files and follows edits, saves,
 creates, deletions, and configuration changes. Unsaved buffers take precedence
@@ -157,7 +276,56 @@ validation, or automatic linking are provided. The catalog is intentionally fini
 See the bundled `research-existing-lsps.md` and `research-library.md` reports
 for primary sources and niche cases.
 
-## Colors and verification
+</details>
+
+<details>
+<summary><strong>Built-in checks</strong></summary>
+
+<a id="built-in-checks"></a>
+
+The extension checks IR as you type, without `llvm-as`. Every error below is one
+`llvm-as` rejects; the test suite checks that against LLVM when it is installed, and
+checks that clang output (with `-O0`–`-O3`, `-g` debug info, C++ exceptions, computed
+`goto`, and atomics) produces no errors or warnings.
+
+| Severity | Code | Reports |
+| --- | --- | --- |
+| Error | `undefined-value`, `undefined-label`, `undefined-type`, `undefined-metadata` | Names with no definition, with a “Did you mean …?” quick fix |
+| Error | `duplicate-definition` | Redefinitions of a global, type, metadata node, or local name (values, parameters, and blocks share one namespace per function) |
+| Error | `numbering` | Numbered values that do not increase, counting unnamed parameters, blocks, and results |
+| Error | `missing-terminator`, `empty-body`, `missing-body`, `unclosed-body` | Blocks without `ret`/`br`/…, and malformed function bodies |
+| Error | `entry-branch`, `not-a-label`, `phi-position`, `phi-predecessors` | Branches to the entry block or to values, and `phi` placement or incoming blocks that do not match the predecessors |
+| Error | `dominance` | Uses of a value on a path where it is not yet defined, and non-`phi` self references |
+| Error | `type-mismatch`, `return-type`, `void-result`, `memory-operands` | Operands whose known type differs from the one written, wrong `ret`, naming a `void` result, and `store`/`load` operands in the wrong order |
+| Error | `unknown-instruction` | Misspelled opcodes, with a quick fix |
+| Warning | `call-signature`, `variadic-call` | Calls whose arguments or result differ from the callee's declaration, and variadic calls without the function type that LangRef requires (quick fix inserts it) |
+| Warning | `division-by-zero`, `unreachable-code`, `undefined-attributes` | Constant zero divisors, instructions after a terminator, and attribute groups LLVM would silently drop |
+| Hint (faded) | `unused-value`, `unused-declaration`, `unused-private`, `unreachable-block` | Values, declarations, and private symbols that are never used, and blocks no path reaches |
+
+An undefined `@name` that another workspace file defines gets an **Add declaration**
+quick fix, using the same agreed declaration as completion.
+
+The checks stay silent when the parse cannot establish a fact: unknown types,
+implicitly numbered branch targets, or unparsed instructions. `llvm-as` remains the
+authority, and when it reports an error on a line, the built-in error on that line is
+hidden so a mistake appears once. Set `llvmIR.diagnostics.scope` to `workspace` to
+check every indexed file; **LLVM IR: Verify Workspace** runs `llvm-as` on all of them
+and summarizes how many fail.
+
+</details>
+
+<details>
+<summary><strong>Verification with llvm-as</strong></summary>
+
+Run **LLVM IR: Verify Document** for immediate verification. Execution/availability
+issues appear in the **LLVM IR Language Tools** Output channel. Verification requires
+a trusted workspace. Source is passed through stdin with no shell, execution of IR,
+or output files in your project. Missing LLVM does not disable other editing features.
+
+</details>
+
+<details>
+<summary><strong>Colors and label color</strong></summary>
 
 Semantic highlighting defaults on for LLVM IR.
 
@@ -200,43 +368,10 @@ and labels use `entity.name.label` (not the HTML-tag scope), recolored by
 (green). Light Modern uses its corresponding accessible light-background palette.
 No theme is switched and no global user color overrides are written.
 
-## Built-in diagnostics
+</details>
 
-The extension checks IR as you type, without `llvm-as`. Every error below is one
-`llvm-as` rejects; the test suite checks that against LLVM when it is installed, and
-checks that clang output (with `-O0`–`-O3`, `-g` debug info, C++ exceptions, computed
-`goto`, and atomics) produces no errors or warnings.
-
-| Severity | Code | Reports |
-| --- | --- | --- |
-| Error | `undefined-value`, `undefined-label`, `undefined-type`, `undefined-metadata` | Names with no definition, with a “Did you mean …?” quick fix |
-| Error | `duplicate-definition` | Redefinitions of a global, type, metadata node, or local name (values, parameters, and blocks share one namespace per function) |
-| Error | `numbering` | Numbered values that do not increase, counting unnamed parameters, blocks, and results |
-| Error | `missing-terminator`, `empty-body`, `missing-body`, `unclosed-body` | Blocks without `ret`/`br`/…, and malformed function bodies |
-| Error | `entry-branch`, `not-a-label`, `phi-position`, `phi-predecessors` | Branches to the entry block or to values, and `phi` placement or incoming blocks that do not match the predecessors |
-| Error | `dominance` | Uses of a value on a path where it is not yet defined, and non-`phi` self references |
-| Error | `type-mismatch`, `return-type`, `void-result`, `memory-operands` | Operands whose known type differs from the one written, wrong `ret`, naming a `void` result, and `store`/`load` operands in the wrong order |
-| Error | `unknown-instruction` | Misspelled opcodes, with a quick fix |
-| Warning | `call-signature`, `variadic-call` | Calls whose arguments or result differ from the callee's declaration, and variadic calls without the function type that LangRef requires (quick fix inserts it) |
-| Warning | `division-by-zero`, `unreachable-code`, `undefined-attributes` | Constant zero divisors, instructions after a terminator, and attribute groups LLVM would silently drop |
-| Hint (faded) | `unused-value`, `unused-declaration`, `unused-private`, `unreachable-block` | Values, declarations, and private symbols that are never used, and blocks no path reaches |
-
-An undefined `@name` that another workspace file defines gets an **Add declaration**
-quick fix, using the same agreed declaration as completion.
-
-The checks stay silent when the parse cannot establish a fact: unknown types,
-implicitly numbered branch targets, or unparsed instructions. `llvm-as` remains the
-authority, and when it reports an error on a line, the built-in error on that line is
-hidden so a mistake appears once. Set `llvmIR.diagnostics.scope` to `workspace` to
-check every indexed file; **LLVM IR: Verify Workspace** runs `llvm-as` on all of them
-and summarizes how many fail.
-
-Run **LLVM IR: Verify Document** for immediate verification. Execution/availability
-issues appear in the **LLVM IR Language Tools** Output channel. Verification requires
-a trusted workspace. Source is passed through stdin with no shell, execution of IR,
-or output files in your project. Missing LLVM does not disable other editing features.
-
-## Scope and limitations
+<details>
+<summary><strong>Scope and limitations</strong></summary>
 
 The analyzer tolerates incomplete source but is not a complete LLVM parser. It
 infers common instruction types and uses `unknown` when a type cannot be established.
@@ -262,15 +397,26 @@ Formatting changes indentation and trailing whitespace, not instruction layout o
 semantics. There is no debugger, automatic refactoring, or diagnostic quick-fix
 engine. This is a local package, not a published Marketplace release.
 
+</details>
+
 ## Develop and test
 
 Source/tests require Node.js 18 or later; packaging tools require Node.js 20 or later.
 Open the repository in VS Code and press **F5** for an Extension Development Host.
 
+To build and install from source:
+
 ```sh
+npm ci --ignore-scripts
 npm test
-npm run test:integration
 npm run package
+code --install-extension ./llvm-ir-language-tools-*.vsix
+```
+
+```sh
+npm test                  # unit tests, no VS Code needed
+npm run test:integration  # the extension inside a real VS Code
+npm run package           # build the .vsix
 ```
 
 The integration runner normally downloads a test VS Code. To use an existing
@@ -281,7 +427,8 @@ VSCODE_EXECUTABLE_PATH=/usr/share/code/code npm run test:integration
 ```
 
 Tests use temporary user/extension directories and do not install into your daily
-profile. Linux needs a display (or `xvfb-run`). Unit tests need no VS Code. Real
+profile. Linux needs a display (or `xvfb-run`); with none at all, set
+`VSCODE_TEST_HEADLESS=1` to render off screen. Unit tests need no VS Code. Real
 LLVM tests skip when `llvm-as` is unavailable. A few tests also run against course
 homework that is not part of this repository; they skip unless `LLVM_IR_COURSE_DIR`
 points at a directory containing `hw0/` and `hw2/`. Set it in the environment or copy
@@ -308,6 +455,22 @@ npm run bench -- big.ll other.ll --runs 5
 
 It prints the median milliseconds per feature. On a 1.7 MB `-O2` C++ module a
 keystroke costs about 0.5 s in total, and about 1 s at 3.7 MB (`-O0`).
+
+### README screenshots and GIFs
+
+Every image in this README is captured from a real VS Code by scripts in
+`scripts/capture/scenarios/`, using the demo project in `docs/demo/`:
+
+```sh
+npm run capture                # all scenarios, into docs/media/
+npm run capture -- hovers      # one scenario
+```
+
+A scenario drives the editor (open a file, move the cursor, type, hover) and
+records stills or GIFs through the Chrome DevTools Protocol; `scripts/capture/host.js`
+documents its API. VS Code renders off screen, so no display is needed. Each GIF
+also writes its first, middle and last frames to `docs/media/.frames/` for review.
+After changing a feature, rerun its scenario and check the result.
 
 ## Attribution and references
 

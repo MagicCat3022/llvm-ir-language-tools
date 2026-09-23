@@ -1,5 +1,13 @@
 # Changes
 
+## 1.2.10 — a README that shows the features
+
+- Hover prose wraps. VS Code's `MarkdownString.appendText` turns every space into `&nbsp;`, so long library notes and parameter descriptions ran past the hover's edge with a scrollbar. Plain text is now escaped as Markdown and keeps its spaces.
+- Clicking a block in the control-flow graph selects its label without re-centering the editor when the label is already on screen.
+- The README leads with install steps and a tour of the features, with screenshots and GIFs captured from a real VS Code. Reference material moved into collapsible sections.
+- `npm run capture` regenerates every README image from scripted scenarios (`scripts/capture/`) and a demo project (`docs/demo/`), rendering off screen.
+- `VSCODE_TEST_HEADLESS=1 npm run test:integration` runs the integration tests without a display.
+
 ## 1.2.9 — large files
 
 Measured on real clang output: a C++ module using `<regex>`, `<map>` and `<sstream>`. The totals below are the cost of one keystroke across every editor feature.
