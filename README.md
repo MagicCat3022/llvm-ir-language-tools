@@ -33,6 +33,7 @@ grammar. Supports `.ll` and `.llvm`. Extension ID: `cse4100-local.llvm-ir-highli
 - Semantic symbol coloring and SSA type inlay hints (on by default; disable with `llvmIR.inlayHints.enabled`). Pointer hints append their inferred pointee (`: ptr → i32`, `: ptr → ptr → %Class_Dog?` for a slot, `: ptr → @dog_makeNoise?`, `ptr %this: ptr → %Class_Dog?`). A trailing `?` marks a hint inferred from uses rather than stated by the instruction; the tooltip gives the qualified explanation.
 - Built-in diagnostics while you type, with no LLVM installation needed (see [Built-in diagnostics](#built-in-diagnostics)), plus quick fixes for misspelled names, missing declarations and variadic calls.
 - Verify current, including unsaved, IR with `llvm-as` in the Problems panel, or every indexed file with **LLVM IR: Verify Workspace**.
+- The language status area (`{}` in the status bar) shows the `llvm-as` version, why verification is unavailable, and whether the workspace index is complete. **LLVM IR: Check LLVM Toolchain** checks `llvm-as` again.
 
 Block labels get their own themeable color (`llvmIR.labelForeground`), with
 definitions in bold, including quoted and numeric labels. Each labeled basic block folds independently, leaving its label
@@ -48,7 +49,7 @@ From the repository root:
 npm ci --ignore-scripts
 npm test
 npm run package
-code --install-extension ./llvm-ir-language-tools-1.2.7.vsix
+code --install-extension ./llvm-ir-language-tools-1.2.8.vsix
 ```
 
 Alternatively use **Extensions → … → Install from VSIX**. Disable
@@ -283,7 +284,8 @@ Tests use temporary user/extension directories and do not install into your dail
 profile. Linux needs a display (or `xvfb-run`). Unit tests need no VS Code. Real
 LLVM tests skip when `llvm-as` is unavailable. A few tests also run against course
 homework that is not part of this repository; they skip unless `LLVM_IR_COURSE_DIR`
-points at a directory containing `hw0/` and `hw2/`.
+points at a directory containing `hw0/` and `hw2/`. Set it in the environment or copy
+`.env.example` to `.env` (gitignored).
 The host tests also tokenize against the actual bundled Dark Modern and Light
 Modern themes, asserting six distinct role colors and matching label references.
 Multi-root tests use copied temporary fixtures to check unopened-file navigation,

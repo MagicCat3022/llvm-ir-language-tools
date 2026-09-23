@@ -182,7 +182,9 @@ function createWorkspaceService(vscode, output, index) {
       if (!cfg.enabled) continue;
       if (!workspace.findFiles || !workspace.fs?.readFile || !workspace.fs?.stat) { fail(key(folder.uri), 'Workspace discovery/filesystem is unavailable.'); continue; }
       try {
-        const patterns = excludes(folder.uri, cfg);
+        // Older ripgrep (VS Code 1.85) rejects nested `{}` groups, and the
+        // default exclude already has one, so combine brace-free patterns.
+        const patterns = [...new Set(excludes(folder.uri, cfg).flatMap(pattern => expandBraces(pattern)))];
         const exclude = patterns.length > 1 ? `{${patterns.join(',')}}` : patterns[0] || null;
         const pattern = vscode.RelativePattern ? new vscode.RelativePattern(folder, cfg.include) : { baseUri: folder.uri, pattern: cfg.include };
         const discoveryRevisions = new Map(generations);
@@ -268,6 +270,43 @@ function createWorkspaceService(vscode, output, index) {
   return { index, start, ready, ensure, sync, rootFor, status, validateEdits, rescan, dispose };
 }
 
+// `a/{b,c{d,e}}` → a/b, a/cd, a/ce. Braces inside `[...]` are literal. A
+// pattern that would expand past `limit` alternatives is kept as written.
+function expandBraces(pattern, limit = 256) {
+  try { return expand(pattern, limit); } catch (error) { if (error === tooMany) return [pattern]; throw error; }
+}
+const tooMany = new Error('too many brace alternatives');
+function expand(pattern, limit) {
+  let open = -1, depth = 0, inClass = false;
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i];
+    if (inClass) { if (c === ']') inClass = false; continue; }
+    if (c === '[') inClass = true;
+    else if (c === '{') { if (!depth++) open = i; }
+    else if (c === '}' && depth && !--depth) {
+      const options = [], body = pattern.slice(open + 1, i);
+      let start = 0, level = 0, cls = false;
+      for (let j = 0; j <= body.length; j++) {
+        const d = body[j];
+        if (cls) { if (d === ']') cls = false; continue; }
+        if (d === '[') cls = true;
+        else if (d === '{') level++;
+        else if (d === '}') level--;
+        else if ((d === ',' && !level) || j === body.length) { options.push(body.slice(start, j)); start = j + 1; }
+      }
+      const expanded = [];
+      for (const option of options) {
+        for (const result of expand(pattern.slice(0, open) + option + pattern.slice(i + 1), limit)) {
+          expanded.push(result);
+          if (expanded.length > limit) throw tooMany;
+        }
+      }
+      return expanded;
+    }
+  }
+  return [pattern];
+}
+
 // VS Code-style common glob forms, including nested brace alternatives. The
 // authoritative discovery uses findFiles; this guard also isolates open files.
 function matches(path, pattern) {
@@ -294,4 +333,4 @@ function matches(path, pattern) {
   try { return new RegExp(`^${compile(pattern)}$`).test(path); } catch { return false; }
 }
 
-module.exports = { createWorkspaceService };
+module.exports = { createWorkspaceService, expandBraces };

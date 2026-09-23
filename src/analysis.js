@@ -791,6 +791,54 @@ const opcodeIndex = tokens => { let i = 0; while (['tail', 'musttail', 'notail']
 const statementStart = statement => statement.symbol?.start ?? statement.tokens[0]?.start;
 const bodyAt = (analysis, offset) => analysis.functions.find(fn => !fn.symbol.declaration && fn.bodyStart < fn.bodyEnd && offset >= fn.bodyStart && offset <= fn.bodyEnd);
 
+// Immediate dominators by Cooper, Harvey and Kennedy's iterative algorithm,
+// with dominance queries answered in O(1) from dominator-tree intervals.
+// Unreachable blocks are dominated by every block, as the verifier treats them.
+function dominatorTree(count, predecessors) {
+  const idom = new Array(count).fill(-1), order = new Array(count).fill(-1), postorder = [];
+  if (count) {
+    const successors = Array.from({ length: count }, () => []);
+    predecessors.forEach((list, block) => { for (const p of list) successors[p].push(block); });
+    const seen = new Uint8Array(count), stack = [[0, 0]];
+    seen[0] = 1;
+    while (stack.length) {
+      const top = stack[stack.length - 1], next = successors[top[0]][top[1]++];
+      if (next === undefined) { order[top[0]] = postorder.length; postorder.push(top[0]); stack.pop(); }
+      else if (!seen[next]) { seen[next] = 1; stack.push([next, 0]); }
+    }
+    idom[0] = 0;
+    const intersect = (a, b) => {
+      while (a !== b) { while (order[a] < order[b]) a = idom[a]; while (order[b] < order[a]) b = idom[b]; }
+      return a;
+    };
+    for (let changed = true; changed;) {
+      changed = false;
+      for (let i = postorder.length - 2; i >= 0; i--) {
+        const block = postorder[i];
+        let next = -1;
+        for (const p of predecessors[block]) if (order[p] >= 0 && idom[p] >= 0) next = next < 0 ? p : intersect(p, next);
+        if (next >= 0 && idom[block] !== next) { idom[block] = next; changed = true; }
+      }
+    }
+  }
+  const children = Array.from({ length: count }, () => []);
+  for (let i = 1; i < count; i++) if (idom[i] >= 0) children[idom[i]].push(i);
+  const enter = new Int32Array(count).fill(-1), leave = new Int32Array(count).fill(-1);
+  let clock = 0;
+  if (count) for (const stack = [[0, 0]]; stack.length;) {
+    const top = stack[stack.length - 1];
+    if (!top[1]) enter[top[0]] = clock++;
+    const child = children[top[0]][top[1]++];
+    if (child === undefined) { leave[top[0]] = clock++; stack.pop(); } else stack.push([child, 0]);
+  }
+  const reachable = block => enter[block] >= 0;
+  const dominators = Array.from({ length: count }, (_, block) => ({
+    has: d => d >= 0 && d < count && (!reachable(block) || reachable(d) && enter[d] <= enter[block] && leave[block] <= leave[d]),
+  }));
+  if (count) idom[0] = -1;
+  return { idom: idom.map(d => d < 0 ? undefined : d), dominators };
+}
+
 // Basic blocks and dominator sets of one function body. Blocks without
 // predecessors are unreachable, where LLVM treats every value as dominating.
 function controlFlow(analysis, fn) {
@@ -825,17 +873,8 @@ function controlFlow(analysis, fn) {
   const byName = new Map(blocks.filter(block => block.label).map((block, _, all) => [canonicalName(block.label.name), blocks.indexOf(block)]));
   const predecessors = blocks.map(() => []);
   blocks.forEach((block, i) => { for (const name of block.successors) if (byName.has(name)) predecessors[byName.get(name)].push(i); });
-  const dominators = blocks.map((_, i) => new Set(i ? blocks.keys() : [0]));
-  for (let changed = true; changed;) {
-    changed = false;
-    for (let i = 1; i < blocks.length; i++) {
-      const incoming = predecessors[i].map(p => dominators[p]);
-      if (!incoming.length) continue;
-      const next = new Set([i, ...[...incoming[0]].filter(d => incoming.every(set => set.has(d)))]);
-      if (next.size !== dominators[i].size) { dominators[i] = next; changed = true; }
-    }
-  }
-  const result = { blocks, dominators, blockAt(offset) { let index = 0; blocks.forEach((block, i) => { if (block.start <= offset) index = i; }); return index; } };
+  const { idom, dominators } = dominatorTree(blocks.length, predecessors);
+  const result = { blocks, idom, dominators, blockAt(offset) { let index = 0; blocks.forEach((block, i) => { if (block.start <= offset) index = i; }); return index; } };
   analysis._index.blocks.set(fn, result);
   return result;
 }
@@ -897,10 +936,8 @@ function blockGraph(analysis, offset) {
   for (const block of blocks) {
     block.reachable = reached.has(block.index);
     if (!block.reachable) continue;
-    // The immediate dominator is the strict dominator dominated by all others;
-    // a back edge comes from a block this one dominates (a natural loop).
-    const strict = [...flow.dominators[block.index]].filter(d => d !== block.index);
-    block.idom = strict.find(d => strict.every(other => flow.dominators[d].has(other)));
+    // A back edge comes from a block this one dominates (a natural loop).
+    block.idom = flow.idom[block.index];
     block.backEdges = block.predecessors.filter(p => reached.has(p) && flow.dominators[p].has(block.index));
   }
   return { fn, blocks, blockAt: position => blocks[flow.blockAt(position)] };
@@ -982,6 +1019,6 @@ function formatIR(text, options = {}) {
   }).join('');
 }
 
-module.exports = { analyze, tokenAt, symbolAt, references, visibleSymbols, callAt, callArguments, availableValues, completionContext, blockGraph, formatIR,
+module.exports = { dominatorTree, analyze, tokenAt, symbolAt, references, visibleSymbols, callAt, callArguments, availableValues, completionContext, blockGraph, formatIR,
   // For checks.js; not a stable interface.
   internals: { functionContaining, lex, readType, firstType, splitTop, matching, closeFor, primitive, operations, terminators, controlFlow, opcodeIndex, statementStart, resolve, canonicalName, sameName, memberType } };

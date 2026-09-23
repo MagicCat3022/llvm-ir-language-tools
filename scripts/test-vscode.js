@@ -28,6 +28,8 @@ async function main() {
       ]
     };
     if (process.env.VSCODE_EXECUTABLE_PATH) options.vscodeExecutablePath = process.env.VSCODE_EXECUTABLE_PATH;
+    // CI tests both the oldest supported release and the newest.
+    else if (process.env.VSCODE_VERSION) options.version = process.env.VSCODE_VERSION;
     await runTests(options);
   } finally {
     await fs.rm(temporary, { recursive: true, force: true });

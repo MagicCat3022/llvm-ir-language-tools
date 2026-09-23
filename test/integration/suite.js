@@ -96,7 +96,9 @@ async function run() {
   assert.match(comparisonHover, /samesign/);
   assert.match(comparisonHover, /poison/);
   const labelHover = hoverText(await vscode.commands.executeCommand('vscode.executeHoverProvider', blocks.uri, at(blocks, 'label %"less value"', 8)));
-  assert.equal(labelHover.trim(), '```llvm-ir\n(label) %"less value"\n```\n\n\n---\n\nLine 5 in @choose');
+  // Branch targets describe the block's place in the control flow and preview it.
+  assert.equal(labelHover.trim(), ['```llvm-ir\n(label) %"less value"\n```\n\n\n---\n\nPredecessors: `%entry`', 'Successors: `%done`',
+    'Immediate dominator: `%entry`, which every path here passes through.\n\n\n```llvm-ir\n"less value":\n  br label %done\n```\n\n\nLine 5 in @choose'].join('\n\n'));
   const parameterHover = hoverText(await vscode.commands.executeCommand('vscode.executeHoverProvider', blocks.uri, at(blocks, 'i32 %x', 5)));
   assert.equal(parameterHover.trim(), '```llvm-ir\n(parameter) %x: i32\n```\n\n\n---\n\nLine 1 in @choose');
   const blockFolds = await vscode.commands.executeCommand('vscode.executeFoldingRangeProvider', blocks.uri);
@@ -128,9 +130,11 @@ async function run() {
   const argumentNames = hints.filter(hint => hint.kind === vscode.InlayHintKind.Parameter).map(hint => typeof hint.label === 'string' ? hint.label : hint.label.map(part => part.value).join(''));
   assert.deepEqual(argumentNames, ['left:', 'right:'], 'call arguments are named after parameters');
   const lenses = await vscode.commands.executeCommand('vscode.executeCodeLensProvider', document.uri, 10);
-  const sumLens = lenses.find(lens => lens.range.start.line === 2);
-  assert.equal(sumLens?.command?.title, '1 reference', 'reference CodeLens counts the call in @main');
-  const branchCompletion = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', document.uri, at(document, 'i32 %right', 4));
+  // A definition carries both a reference count and a control-flow graph link.
+  const sumLenses = lenses.filter(lens => lens.range.start.line === 2).map(lens => lens.command?.title);
+  assert.ok(sumLenses.includes('1 reference'), `reference CodeLens counts the call in @main: ${sumLenses}`);
+  assert.ok(sumLenses.includes('Control-flow graph'), `definitions link to their control-flow graph: ${sumLenses}`);
+  const branchCompletion = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', document.uri, at(document, 'add i32 %left', 8));
   assert.ok(branchCompletion.items.every(item => !String(typeof item.label === 'string' ? item.label : item.label.label).startsWith('@')), 'an i32 operand excludes pointer globals');
   const formatted = await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', document.uri, { tabSize: 4, insertSpaces: true });
   assert.ok(Array.isArray(formatted));

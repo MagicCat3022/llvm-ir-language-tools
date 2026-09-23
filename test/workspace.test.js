@@ -99,6 +99,9 @@ test('explicit and configured boolean excludes isolate buffers and skip disk rea
     { 'files.exclude': { '**/generated/**': true }, 'search.exclude': { '**/search/**': true, '**/*.sibling': { when: '$(basename).ll' } } });
   await f.service.start(); assert.deepEqual(f.index.documents().map(doc => doc.text), ['ok']);
   assert.ok(f.hooks.lastFind.exclude.includes('generated'));
+  // VS Code 1.85's ripgrep fails on nested alternate groups.
+  assert.doesNotMatch(f.hooks.lastFind.exclude.slice(1, -1), /[{}]/, f.hooks.lastFind.exclude);
+  assert.ok(f.hooks.lastFind.exclude.includes('**/node_modules/**'));
   const doc = f.document('file:///work/build/a.ll', 'open'); f.open(doc);
   assert.equal(f.index.get(id(doc.uri)).root, id(doc.uri));
   const custom = f.document('file:///work/source.txt', 'define void @f() {}'); f.open(custom);
@@ -202,4 +205,14 @@ test('stale discovery cannot resurrect a file deleted before its read was schedu
   f.watcherEvents.delete(uri('file:///work/a.ll'));
   gate.resolve(); await pending; await f.service.ready();
   assert.equal(f.index.get('file:///work/a.ll'), undefined);
+});
+
+test('brace expansion flattens nested alternatives for older ripgrep', () => {
+  const { expandBraces } = require('../src/workspace');
+  assert.deepEqual(expandBraces('**/{.git,node_modules}/**'), ['**/.git/**', '**/node_modules/**']);
+  assert.deepEqual(expandBraces('a/{b,c{d,e}}/*.{ll,llvm}'), ['a/b/*.ll', 'a/b/*.llvm', 'a/cd/*.ll', 'a/cd/*.llvm', 'a/ce/*.ll', 'a/ce/*.llvm']);
+  assert.deepEqual(expandBraces('[{]x'), ['[{]x']);
+  assert.deepEqual(expandBraces('plain/**'), ['plain/**']);
+  const huge = '{a,b}'.repeat(10);
+  assert.deepEqual(expandBraces(huge), [huge]);
 });

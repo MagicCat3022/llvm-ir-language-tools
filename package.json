@@ -2,7 +2,7 @@
 	"name": "llvm-ir-highlighter",
 	"displayName": "LLVM IR Language Tools (Local)",
 	"description": "LLVM IR highlighting, type/instruction/library help, cross-file navigation and rename, completion, formatting, and LLVM verification.",
-	"version": "1.2.7",
+	"version": "1.2.8",
 	"publisher": "cse4100-local",
 	"license": "MIT",
 	"repository": {
@@ -37,7 +37,7 @@
 	"scripts": {
 		"test": "node --test test/*.test.js",
 		"test:integration": "node scripts/test-vscode.js",
-		"package": "vsce package --no-dependencies --allow-missing-repository --out llvm-ir-language-tools-1.2.7.vsix"
+		"package": "vsce package --no-dependencies --allow-missing-repository --out llvm-ir-language-tools-1.2.8.vsix"
 	},
 	"devDependencies": {
 		"@vscode/test-electron": "3.1.0",
@@ -80,6 +80,7 @@
 				"title": "LLVM IR: Verify Document"
 			},
 			{ "command": "llvmIR.verifyWorkspace", "title": "LLVM IR: Verify Workspace" },
+			{ "command": "llvmIR.checkToolchain", "title": "LLVM IR: Check LLVM Toolchain" },
 			{ "command": "llvmIR.showControlFlowGraph", "title": "LLVM IR: Show Control-Flow Graph", "icon": "$(type-hierarchy-sub)" }
 		],
 		"menus": {

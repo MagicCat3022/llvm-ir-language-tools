@@ -41,8 +41,10 @@ async function run() {
   const items = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', doc.uri, at(doc, '@twice(i32 21)', 1));
   const remote = items.items.find(item => label(item) === '@remote_only');
   assert.ok(remote, 'undeclared workspace function suggested');
-  assert.match(remote.detail, /declaration required/i);
-  assert.ok(!remote.additionalTextEdits?.length, 'completion does not guess an ABI declaration');
+  // Its signature has no named types, so completion also adds the declaration.
+  assert.match(remote.detail, /adds declaration/i);
+  assert.equal(remote.additionalTextEdits?.length, 1, 'completion adds one declaration');
+  assert.match(remote.additionalTextEdits[0].newText, /^\s*declare void @remote_only\(\)\s*$/);
   assert.ok(!items.items.some(item => label(item) === '@excluded_function'));
   const hover = text(await vscode.commands.executeCommand('vscode.executeHoverProvider', doc.uri, at(doc, '@twice(i32 21)')));
   assert.match(hover, /impl\.llvm/);

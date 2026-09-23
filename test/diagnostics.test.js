@@ -6,7 +6,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { parseDiagnostics, verifyIR } = require('../src/diagnostics');
+const { parseDiagnostics, verifyIR, probeLLVMAs, parseLLVMVersion, producerVersion } = require('../src/diagnostics');
 
 test('parses positional errors, warnings, excerpts, and CRLF offsets', () => {
   const text = 'define i32 @main() {\r\n  ret i33 0\r\n}\r\n';
@@ -41,6 +41,8 @@ test('missing executable and already cancelled requests are not IR errors', asyn
   const result = await verifyIR('', { executable: path.join(os.tmpdir(), 'missing-llvm-as-57b87c01') });
   assert.deepEqual(result.issues, []);
   assert.match(result.unavailable, /Cannot run/);
+  assert.equal(result.reason, 'missing');
+  assert.equal((await probeLLVMAs(path.join(os.tmpdir(), 'missing-llvm-as-57b87c01'))).reason, 'missing');
   const controller = new AbortController();
   controller.abort();
   assert.deepEqual(await verifyIR('', { signal: controller.signal }), { issues: [], cancelled: true });
@@ -73,6 +75,7 @@ test('timeouts kill a compiler even when it ignores SIGTERM', fakeOptions, async
   const executable = await fakeCompiler(t, "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);");
   const result = await verifyIR('', { executable, timeoutMs: 100 });
   assert.match(result.unavailable, /timed out/);
+  assert.equal(result.reason, 'timeout');
   assert.deepEqual(result.issues, []);
 });
 
@@ -105,6 +108,15 @@ test('nonzero tool failures cannot silently pass verification', fakeOptions, asy
   const result = await verifyIR('', { executable });
   assert.deepEqual(result.issues, []);
   assert.match(result.unavailable, /failed to load a library/);
+});
+
+test('reads the LLVM version of llvm-as and of the producer of a module', fakeOptions, async (t) => {
+  assert.deepEqual(parseLLVMVersion('LLVM (http://llvm.org/):\n  LLVM version 17.0.6\n  Optimized build.'), { major: 17, text: '17.0.6' });
+  assert.equal(parseLLVMVersion('llvm-as: unknown'), undefined);
+  assert.equal(producerVersion('!llvm.ident = !{!0}\n!0 = !{!"Ubuntu clang version 18.1.3 (1ubuntu1)"}'), 18);
+  assert.equal(producerVersion('define void @f() { ret void }'), undefined);
+  const executable = await fakeCompiler(t, "if (process.argv[2] === '--version') console.log('LLVM version 16.0.2');");
+  assert.deepEqual(await probeLLVMAs(executable), { version: { major: 16, text: '16.0.2' } });
 });
 
 const llvmAvailable = spawnSync('llvm-as', ['--version'], { timeout: 2000 }).status === 0;

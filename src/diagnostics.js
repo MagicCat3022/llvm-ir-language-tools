@@ -59,6 +59,52 @@ function parseDiagnostics(stderr, text) {
   return issues;
 }
 
+// `missing`: no such executable; `not-executable`: found but cannot be run.
+function spawnReason(error) {
+  if (error && error.code === 'ENOENT') return 'missing';
+  if (error && (error.code === 'EACCES' || error.code === 'EPERM' || error.code === 'ENOEXEC')) return 'not-executable';
+  return 'failed';
+}
+
+/** Major LLVM version from `llvm-as --version` output, e.g. 18 for "LLVM version 18.1.3". */
+function parseLLVMVersion(output) {
+  const match = /LLVM version (\d+)(?:\.(\d+))?(?:\.(\d+))?/i.exec(output || '');
+  return match ? { major: Number(match[1]), text: match.slice(1).filter(part => part !== undefined).join('.') } : undefined;
+}
+
+/** Major LLVM version that produced a module, from its `clang version` ident. */
+function producerVersion(text) {
+  const match = /!\{\s*!"[^"]*?(?:clang|LLVM|flang|rustc)[^"]*?version (\d+)\.\d+/i.exec(text || '');
+  return match ? Number(match[1]) : undefined;
+}
+
+/** Run `llvm-as --version`: `{ version }`, or `{ unavailable, reason }`. */
+function probeLLVMAs(executable = 'llvm-as', { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  return new Promise((resolve) => {
+    let child, done = false, output = '';
+    const finish = (result) => { if (!done) { done = true; clearTimeout(timer); resolve(result); } };
+    const timer = setTimeout(() => {
+      child?.kill('SIGKILL');
+      finish({ unavailable: `${executable} --version timed out after ${timeoutMs} ms.`, reason: 'timeout' });
+    }, timeoutMs);
+    try {
+      child = spawn(executable, ['--version'], { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (error) {
+      finish({ unavailable: `Cannot start ${executable}: ${error.message}`, reason: spawnReason(error) });
+      return;
+    }
+    const receive = (chunk) => { if (output.length < 64 * 1024) output += chunk.toString('utf8'); };
+    child.stdout.on('data', receive);
+    child.stderr.on('data', receive);
+    child.on('error', (error) => finish({ unavailable: `Cannot run ${executable}: ${error.message}`, reason: spawnReason(error) }));
+    child.on('close', (code) => {
+      const version = parseLLVMVersion(output);
+      if (version) finish({ version });
+      else finish({ unavailable: `${executable} --version did not report an LLVM version${code ? ` (exit code ${code})` : ''}.`, reason: 'failed' });
+    });
+  });
+}
+
 /** Verify the provided (possibly unsaved) IR without executing it or writing user files. */
 function verifyIR(text, options = {}) {
   const executable = options.executable || 'llvm-as';
@@ -97,11 +143,11 @@ function verifyIR(text, options = {}) {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch (error) {
-      finish({ issues: [], unavailable: `Cannot start ${executable}: ${error.message}` });
+      finish({ issues: [], unavailable: `Cannot start ${executable}: ${error.message}`, reason: spawnReason(error) });
       return;
     }
     child.on('error', (error) => {
-      finish(stopped || { issues: [], unavailable: `Cannot run ${executable}: ${error.message}` });
+      finish(stopped || { issues: [], unavailable: `Cannot run ${executable}: ${error.message}`, reason: spawnReason(error) });
     });
     child.stdin.on('error', (error) => {
       // llvm-as can reject input before stdin finishes, which legitimately causes EPIPE.
@@ -111,7 +157,7 @@ function verifyIR(text, options = {}) {
       if (done || stopped) return;
       outputBytes += chunk.length;
       if (outputBytes > MAX_OUTPUT_BYTES) {
-        stop({ issues: [], unavailable: `${executable} exceeded the 1 MiB output limit.` });
+        stop({ issues: [], unavailable: `${executable} exceeded the 1 MiB output limit.`, reason: 'output-limit' });
       } else if (isStderr) {
         stderr.push(chunk);
       }
@@ -123,18 +169,18 @@ function verifyIR(text, options = {}) {
       const output = Buffer.concat(stderr).toString('utf8').trim();
       const issues = parseDiagnostics(output, text);
       if (exitSignal) {
-        finish({ issues: [], unavailable: `${executable} terminated with ${exitSignal}.` });
+        finish({ issues: [], unavailable: `${executable} terminated with ${exitSignal}.`, reason: 'crashed' });
       } else if (issues.length) {
         finish({ issues });
       } else if (code !== 0 || inputError) {
         const detail = output || (inputError && inputError.message) || `exit code ${code}`;
-        finish({ issues: [], unavailable: `${executable} could not verify the IR: ${detail}` });
+        finish({ issues: [], unavailable: `${executable} could not verify the IR: ${detail}`, reason: 'failed' });
       } else {
         finish({ issues: [] });
       }
     });
     timer = setTimeout(() => stop({
-      issues: [], unavailable: `${executable} verification timed out after ${timeoutMs} ms.`,
+      issues: [], unavailable: `${executable} verification timed out after ${timeoutMs} ms.`, reason: 'timeout',
     }), timeoutMs);
     if (signal) {
       signal.addEventListener('abort', abort, { once: true });
@@ -144,10 +190,10 @@ function verifyIR(text, options = {}) {
       try {
         child.stdin.end(text, 'utf8');
       } catch (error) {
-        stop({ issues: [], unavailable: `Cannot send IR to ${executable}: ${error.message}` });
+        stop({ issues: [], unavailable: `Cannot send IR to ${executable}: ${error.message}`, reason: 'failed' });
       }
     }
   });
 }
 
-module.exports = { parseDiagnostics, verifyIR };
+module.exports = { parseDiagnostics, verifyIR, probeLLVMAs, parseLLVMVersion, producerVersion };
