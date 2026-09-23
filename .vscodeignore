@@ -10,3 +10,5 @@ architecture.md
 certification-status.md
 **/.DS_Store
 **/__MACOSX/**
+.env
+.env.example

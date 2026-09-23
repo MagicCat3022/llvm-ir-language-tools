@@ -283,7 +283,8 @@ Tests use temporary user/extension directories and do not install into your dail
 profile. Linux needs a display (or `xvfb-run`). Unit tests need no VS Code. Real
 LLVM tests skip when `llvm-as` is unavailable. A few tests also run against course
 homework that is not part of this repository; they skip unless `LLVM_IR_COURSE_DIR`
-points at a directory containing `hw0/` and `hw2/`.
+points at a directory containing `hw0/` and `hw2/`. Set it in the environment or copy
+`.env.example` to `.env` (gitignored).
 The host tests also tokenize against the actual bundled Dark Modern and Light
 Modern themes, asserting six distinct role colors and matching label references.
 Multi-root tests use copied temporary fixtures to check unopened-file navigation,
