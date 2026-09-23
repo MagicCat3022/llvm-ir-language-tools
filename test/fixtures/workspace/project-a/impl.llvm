@@ -1,0 +1,15 @@
+define i32 @twice(i32 %value) {
+entry:
+  %result = mul i32 %value, 2
+  ret i32 %result
+}
+
+define internal i32 @helper() {
+entry:
+  ret i32 2
+}
+
+define void @remote_only() {
+entry:
+  ret void
+}

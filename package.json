@@ -1,0 +1,232 @@
+{
+	"name": "llvm-ir-highlighter",
+	"displayName": "LLVM IR Language Tools (Local)",
+	"description": "LLVM IR highlighting, type/instruction/library help, cross-file navigation and rename, completion, formatting, and LLVM verification.",
+	"version": "1.2.7",
+	"publisher": "cse4100-local",
+	"license": "MIT",
+	"engines": {
+		"vscode": "^1.85.0"
+	},
+	"main": "./src/extension.js",
+	"activationEvents": [
+		"onLanguage:llvm-ir",
+		"workspaceContains:**/*.{ll,llvm}"
+	],
+	"extensionKind": [
+		"workspace"
+	],
+	"capabilities": {
+		"untrustedWorkspaces": {
+			"supported": "limited",
+			"description": "Editing features work; external LLVM verification requires workspace trust.",
+			"restrictedConfigurations": [
+				"llvmIR.llvmAsPath"
+			]
+		},
+		"virtualWorkspaces": {
+			"supported": true
+		}
+	},
+	"scripts": {
+		"test": "node --test test/*.test.js",
+		"test:integration": "node scripts/test-vscode.js",
+		"package": "vsce package --no-dependencies --allow-missing-repository --out llvm-ir-language-tools-1.2.7.vsix"
+	},
+	"devDependencies": {
+		"@vscode/test-electron": "3.1.0",
+		"@vscode/vsce": "3.9.2",
+		"vscode-oniguruma": "2.0.1",
+		"vscode-textmate": "9.3.2"
+	},
+	"categories": [
+		"Programming Languages"
+	],
+	"keywords": [
+		"llvm",
+		"llvm ir",
+		"ll",
+		"compiler",
+		"intermediate representation"
+	],
+	"contributes": {
+		"colors": [
+			{
+				"id": "llvmIR.labelForeground",
+				"description": "Color of basic-block labels in LLVM IR, at their definitions and at branch, switch and phi references.",
+				"defaults": { "dark": "#FFB86C", "light": "#953800", "highContrast": "#FFB86C", "highContrastLight": "#8A4600" }
+			}
+		],
+		"semanticTokenScopes": [
+			{
+				"language": "llvm-ir",
+				"scopes": {
+					"label": [
+						"entity.name.label.llvm"
+					]
+				}
+			}
+		],
+		"commands": [
+			{ "command": "llvmIR.reindex", "title": "LLVM IR: Reindex Workspace" },
+			{
+				"command": "llvmIR.verify",
+				"title": "LLVM IR: Verify Document"
+			},
+			{ "command": "llvmIR.verifyWorkspace", "title": "LLVM IR: Verify Workspace" },
+			{ "command": "llvmIR.showControlFlowGraph", "title": "LLVM IR: Show Control-Flow Graph", "icon": "$(type-hierarchy-sub)" }
+		],
+		"menus": {
+			"editor/title": [
+				{ "command": "llvmIR.showControlFlowGraph", "when": "editorLangId == llvm-ir", "group": "navigation" }
+			],
+			"editor/context": [
+				{ "command": "llvmIR.showControlFlowGraph", "when": "editorLangId == llvm-ir", "group": "navigation@9" }
+			],
+			"commandPalette": [
+				{ "command": "llvmIR.showControlFlowGraph", "when": "editorLangId == llvm-ir" }
+			]
+		},
+		"configuration": {
+			"title": "LLVM IR Language Tools",
+			"properties": {
+				"llvmIR.workspace.enabled": {
+					"type": "boolean", "default": true,
+					"description": "Index LLVM IR files for cross-file navigation, completion and safe rename."
+				},
+				"llvmIR.workspace.include": {
+					"type": "string", "default": "**/*.{ll,llvm}",
+					"description": "Workspace-relative glob for LLVM IR files to index."
+				},
+				"llvmIR.workspace.exclude": {
+					"type": "string", "default": "**/{.git,node_modules,.vscode-test,build,dist,out}/**",
+					"description": "Workspace-relative glob excluded from cross-file indexing."
+				},
+				"llvmIR.workspace.maxFiles": {
+					"type": "integer", "default": 500, "minimum": 1, "maximum": 10000,
+					"description": "Maximum files to index per workspace folder. Partial indexes cannot be used for external rename."
+				},
+				"llvmIR.workspace.maxFileBytes": {
+					"type": "integer", "default": 2097152, "minimum": 1024, "maximum": 16777216,
+					"description": "Maximum bytes per indexed file."
+				},
+				"llvmIR.workspace.maxTotalBytes": {
+					"type": "integer", "default": 33554432, "minimum": 1024, "maximum": 268435456,
+					"description": "Maximum total source bytes to index per workspace folder."
+				},
+				"llvmIR.workspace.projectRoots": {
+					"type": "array", "default": [], "items": { "type": "string" }, "uniqueItems": true,
+					"description": "Relative subdirectories treated as independent linkage projects, for example hw0 and hw1. Longest matching root wins."
+				},
+				"llvmIR.libraryHelp.enabled": {
+					"type": "boolean", "default": true,
+					"description": "Show curated C-library and LLVM intrinsic documentation; declarations and target ABI remain authoritative."
+				},
+				"llvmIR.diagnostics.enabled": {
+					"type": "boolean",
+					"default": true,
+					"description": "Verify open LLVM IR documents using llvm-as in trusted workspaces."
+				},
+				"llvmIR.llvmAsPath": {
+					"type": "string",
+					"default": "llvm-as",
+					"scope": "machine-overridable",
+					"description": "LLVM assembler executable. Use the LLVM version matching your project."
+				},
+				"llvmIR.diagnostics.builtIn": {
+					"type": "boolean",
+					"default": true,
+					"description": "Report built-in checks while editing, without LLVM installed: undefined or duplicate names, malformed blocks, dominance, type mismatches, and unused values. Errors that llvm-as also reports on the same line are shown once."
+				},
+				"llvmIR.diagnostics.scope": {
+					"type": "string",
+					"enum": ["openFiles", "workspace"],
+					"enumDescriptions": ["Check open LLVM IR documents.", "Also check every indexed workspace file (requires llvmIR.workspace.enabled)."],
+					"default": "openFiles",
+					"description": "Which files built-in checks cover. Run LLVM IR: Verify Workspace to check every indexed file with llvm-as."
+				},
+				"llvmIR.diagnostics.delay": {
+					"type": "number",
+					"default": 600,
+					"minimum": 100,
+					"maximum": 10000,
+					"description": "Milliseconds to wait after typing before verification."
+				},
+				"llvmIR.diagnostics.timeout": {
+					"type": "number",
+					"default": 5000,
+					"minimum": 100,
+					"maximum": 30000,
+					"description": "Maximum milliseconds to wait for llvm-as."
+				},
+				"llvmIR.inlayHints.enabled": {
+					"type": "boolean",
+					"default": true,
+					"description": "Show inferred types next to SSA definitions, and what pointers refer to when the file determines it."
+				},
+				"llvmIR.inlayHints.parameterNames": {
+					"type": "boolean",
+					"default": true,
+					"description": "Show parameter names before call arguments, from the callee's declaration or, for unnamed library declarations, its documentation. Requires llvmIR.inlayHints.enabled."
+				},
+				"llvmIR.codeLens.references": {
+					"type": "boolean",
+					"default": true,
+					"description": "Show a reference count above functions, globals and named types. Counts span the workspace when indexing is enabled."
+				},
+				"llvmIR.labels.highlight": {
+					"type": "boolean",
+					"default": true,
+					"description": "Color basic-block labels with the llvmIR.labelForeground theme color and bold their definitions. Default themes color labels like plain text; override the color with workbench.colorCustomizations."
+				},
+				"llvmIR.inlayHints.predecessors": {
+					"type": "boolean",
+					"default": true,
+					"description": "Show each block's predecessors after its label (preds: %entry, %loop), unless a ; preds comment is already there. Requires llvmIR.inlayHints.enabled."
+				},
+				"llvmIR.codeLens.controlFlowGraph": {
+					"type": "boolean",
+					"default": true,
+					"description": "Show a Control-flow graph link above each function definition."
+				},
+				"llvmIR.semanticHighlighting.enabled": {
+					"type": "boolean",
+					"default": true,
+					"description": "Highlight resolved symbols by their semantic kind."
+				}
+			}
+		},
+		"languages": [
+			{
+				"id": "llvm-ir",
+				"aliases": [
+					"LLVM IR",
+					"llvm-ir",
+					"llvm"
+				],
+				"extensions": [
+					".ll",
+					".llvm"
+				],
+				"firstLine": "^(; ModuleID =|source_filename =|target (datalayout|triple) =)",
+				"configuration": "./language-configuration.json"
+			}
+		],
+		"grammars": [
+			{
+				"language": "llvm-ir",
+				"scopeName": "source.llvm",
+				"path": "./syntaxes/llvm-ir.tmLanguage.json"
+			}
+		],
+		"configurationDefaults": {
+			"[llvm-ir]": {
+				"editor.semanticHighlighting.enabled": true
+			},
+			"files.associations": {
+				"*.ll": "llvm-ir",
+				"*.llvm": "llvm-ir"
+			}
+		}
+	}
+}

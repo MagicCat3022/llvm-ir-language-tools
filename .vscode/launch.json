@@ -1,0 +1,9 @@
+{
+  "version": "0.2.0",
+  "configurations": [{
+    "name": "Run LLVM IR Language Tools",
+    "type": "extensionHost",
+    "request": "launch",
+    "args": ["--extensionDevelopmentPath=${workspaceFolder}", "--disable-extension=qiu.llvm-ir-language-support"]
+  }]
+}

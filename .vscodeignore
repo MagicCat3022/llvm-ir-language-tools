@@ -1,0 +1,12 @@
+node_modules/**
+test/**
+scripts/**
+.vscode/**
+.vscode-test/**
+.gitignore
+*.vsix
+package-lock.json
+architecture.md
+certification-status.md
+**/.DS_Store
+**/__MACOSX/**

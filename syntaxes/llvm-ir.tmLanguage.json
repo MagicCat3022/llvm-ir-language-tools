@@ -1,0 +1,418 @@
+{
+	"name": "LLVM IR",
+	"scopeName": "source.llvm",
+	"fileTypes": [
+		"ll",
+		"llvm"
+	],
+	"patterns": [
+		{ "include": "#comments" },
+		{ "include": "#labels" },
+		{ "include": "#phi-operands" },
+		{ "include": "#placeholders" },
+		{ "include": "#metadata" },
+		{ "include": "#identifiers" },
+		{ "include": "#attribute-groups" },
+		{ "include": "#strings" },
+		{ "include": "#types" },
+		{ "include": "#constants" },
+		{ "include": "#instructions-control-flow" },
+		{ "include": "#instructions" },
+		{ "include": "#comparison-predicates" },
+		{ "include": "#linkage" },
+		{ "include": "#calling-conventions" },
+		{ "include": "#function-attributes" },
+		{ "include": "#parameter-attributes" },
+		{ "include": "#keywords" },
+		{ "include": "#numbers" },
+		{ "include": "#operators" }
+	],
+	"repository": {
+		"comments": {
+			"patterns": [
+				{
+					"name": "comment.line.semicolon.llvm",
+					"begin": ";",
+					"beginCaptures": {
+						"0": { "name": "punctuation.definition.comment.llvm" }
+					},
+					"end": "$"
+				}
+			]
+		},
+
+		"labels": {
+			"patterns": [
+				{
+					"match": "^[ \\t]*((?:[-a-zA-Z$._][-a-zA-Z$._0-9]*|[0-9]+|\"(?:[^\"\\\\]|\\\\[0-9A-Fa-f]{2})*\"))[ \\t]*(:)",
+					"captures": {
+						"1": { "name": "entity.name.label.llvm" },
+						"2": { "name": "punctuation.separator.label.llvm" }
+					}
+				},
+				{
+					"comment": "Explicit basic-block operands use the same scope as their definitions, including the sigil.",
+					"match": "\\b(label)([ \\t]+)(%(?:[-a-zA-Z$._][-a-zA-Z$._0-9]*|[0-9]+|\"(?:[^\"\\\\]|\\\\[0-9A-Fa-f]{2})*\"))",
+					"captures": {
+						"1": { "name": "support.type.primitive.llvm" },
+						"3": { "name": "entity.name.label.llvm" }
+					}
+				}
+			]
+		},
+
+		"phi-operands": {
+			"comment": "A line-local fallback for phi predecessors; semantic highlighting resolves multiline and other block references.",
+			"begin": "\\b(phi)\\b",
+			"beginCaptures": {
+				"1": { "name": "keyword.other.operator.llvm" }
+			},
+			"end": "$",
+			"patterns": [
+				{
+					"match": "(,)[ \\t]*(%(?:[-a-zA-Z$._][-a-zA-Z$._0-9]*|[0-9]+|\"(?:[^\"\\\\]|\\\\[0-9A-Fa-f]{2})*\"))(?=[ \\t]*\\])",
+					"captures": {
+						"1": { "name": "punctuation.separator.llvm" },
+						"2": { "name": "entity.name.label.llvm" }
+					}
+				},
+				{ "include": "$self" }
+			]
+		},
+
+		"placeholders": {
+			"comment": "LangRef-style syntax parameters, without consuming real vector types such as <4 x i32>.",
+			"name": "variable.parameter.placeholder.llvm",
+			"match": "<[A-Za-z_][A-Za-z_0-9-]*>"
+		},
+
+		"metadata": {
+			"patterns": [
+				{
+					"comment": "Specialized nodes: !DILocation(...), !DISubprogram(...)",
+					"match": "(!)([A-Z][A-Za-z0-9_]*)(?=\\s*\\()",
+					"captures": {
+						"1": { "name": "punctuation.definition.metadata.llvm" },
+						"2": { "name": "support.type.metadata.llvm" }
+					}
+				},
+				{
+					"comment": "Named metadata and attachments: !dbg, !llvm.module.flags, !tbaa",
+					"match": "(!)([-a-zA-Z$._][-a-zA-Z$._0-9]*)",
+					"captures": {
+						"1": { "name": "punctuation.definition.metadata.llvm" },
+						"2": { "name": "entity.name.tag.metadata.llvm" }
+					}
+				},
+				{
+					"comment": "Numbered metadata: !0, !42",
+					"match": "(!)([0-9]+)",
+					"captures": {
+						"1": { "name": "punctuation.definition.metadata.llvm" },
+						"2": { "name": "constant.other.metadata.llvm" }
+					}
+				},
+				{
+					"comment": "Leading ! of a node body or metadata string: !{...}, !\"text\"",
+					"name": "punctuation.definition.metadata.llvm",
+					"match": "(?<![-a-zA-Z$._0-9])!(?=[{\"])"
+				},
+				{
+					"comment": "Debug record intrinsics: #dbg_value(...), #dbg_declare(...)",
+					"match": "(#)(dbg_[a-z_]+)",
+					"captures": {
+						"1": { "name": "punctuation.definition.metadata.llvm" },
+						"2": { "name": "entity.name.tag.metadata.llvm" }
+					}
+				},
+				{
+					"comment": "Debug info enumerators used as bare words",
+					"name": "constant.other.debuginfo.llvm",
+					"match": "\\b(DW_[A-Z]+_[A-Za-z0-9_]+|DIFlag[A-Za-z0-9_]*|DISPFlag[A-Za-z0-9_]*|CSK_[A-Za-z0-9_]+|FullDebug|LineTablesOnly|DebugDirectivesOnly|NoDebug)\\b"
+				},
+				{
+					"comment": "Field names inside specialized nodes: line:, scope:, file:",
+					"match": "(?<=[(,])\\s*([a-zA-Z_][a-zA-Z0-9_]*)(?=:)",
+					"captures": {
+						"1": { "name": "variable.parameter.metadata.llvm" }
+					}
+				}
+			]
+		},
+
+		"identifiers": {
+			"patterns": [
+				{
+					"comment": "Quoted global: @\"some name\"",
+					"match": "(@)(\"(?:[^\"\\\\]|\\\\.)*\")",
+					"captures": {
+						"1": { "name": "punctuation.definition.variable.global.llvm" },
+						"2": { "name": "entity.name.function.global.llvm" }
+					}
+				},
+				{
+					"comment": "Global: @main, @.str, @llvm.memcpy.p0.p0.i64",
+					"match": "(@)([-a-zA-Z$._][-a-zA-Z$._0-9]*)",
+					"captures": {
+						"1": { "name": "punctuation.definition.variable.global.llvm" },
+						"2": { "name": "entity.name.function.global.llvm" }
+					}
+				},
+				{
+					"comment": "Unnamed global: @0",
+					"match": "(@)([0-9]+)",
+					"captures": {
+						"1": { "name": "punctuation.definition.variable.global.llvm" },
+						"2": { "name": "entity.name.function.global.llvm" }
+					}
+				},
+				{
+					"comment": "Named struct type definition: %struct.Foo = type { ... }",
+					"match": "(%)((?:[-a-zA-Z$._][-a-zA-Z$._0-9]*)|(?:\"(?:[^\"\\\\]|\\\\.)*\"))(?=\\s*=\\s*type\\b)",
+					"captures": {
+						"1": { "name": "punctuation.definition.variable.local.llvm" },
+						"2": { "name": "entity.name.type.struct.llvm" }
+					}
+				},
+				{
+					"comment": "Quoted local: %\"some name\"",
+					"match": "(%)(\"(?:[^\"\\\\]|\\\\.)*\")",
+					"captures": {
+						"1": { "name": "punctuation.definition.variable.local.llvm" },
+						"2": { "name": "variable.other.local.llvm" }
+					}
+				},
+				{
+					"comment": "Local: %retval, %if.then",
+					"match": "(%)([-a-zA-Z$._][-a-zA-Z$._0-9]*)",
+					"captures": {
+						"1": { "name": "punctuation.definition.variable.local.llvm" },
+						"2": { "name": "variable.other.local.llvm" }
+					}
+				},
+				{
+					"comment": "Unnamed local: %1",
+					"match": "(%)([0-9]+)",
+					"captures": {
+						"1": { "name": "punctuation.definition.variable.local.llvm" },
+						"2": { "name": "variable.other.local.llvm" }
+					}
+				},
+				{
+					"comment": "Comdat: $foo",
+					"match": "(\\$)((?:[-a-zA-Z$._][-a-zA-Z$._0-9]*)|(?:\"(?:[^\"\\\\]|\\\\.)*\"))",
+					"captures": {
+						"1": { "name": "punctuation.definition.variable.comdat.llvm" },
+						"2": { "name": "entity.name.type.comdat.llvm" }
+					}
+				}
+			]
+		},
+
+		"attribute-groups": {
+			"patterns": [
+				{
+					"comment": "Attribute group reference or definition: #0",
+					"match": "(#)([0-9]+)",
+					"captures": {
+						"1": { "name": "punctuation.definition.attribute-group.llvm" },
+						"2": { "name": "entity.other.attribute-name.group.llvm" }
+					}
+				}
+			]
+		},
+
+		"strings": {
+			"patterns": [
+				{
+					"name": "string.quoted.double.llvm",
+					"begin": "(?<![@%$])(c?)\"",
+					"beginCaptures": {
+						"0": { "name": "punctuation.definition.string.begin.llvm" },
+						"1": { "name": "storage.type.string.llvm" }
+					},
+					"end": "\"|$",
+					"endCaptures": {
+						"0": { "name": "punctuation.definition.string.end.llvm" }
+					},
+					"patterns": [
+						{
+							"name": "constant.character.escape.llvm",
+							"match": "\\\\(?:[0-9A-Fa-f]{2}|\\\\)"
+						}
+					]
+				}
+			]
+		},
+
+		"types": {
+			"patterns": [
+				{
+					"comment": "Arbitrary precision integers: i1, i8, i32, i1024",
+					"name": "support.type.integer.llvm",
+					"match": "\\bi[0-9]+\\b"
+				},
+				{
+					"name": "support.type.primitive.llvm",
+					"match": "\\b(void|half|bfloat|float|double|fp128|x86_fp80|x86_mmx|x86_amx|ppc_fp128|label|token|metadata|ptr|opaque)\\b"
+				},
+				{
+					"comment": "Element count separator in [4 x i32], <8 x float>, <vscale x 4 x i1>",
+					"name": "keyword.operator.array.llvm",
+					"match": "(?<=[0-9A-Za-z_]\\s)x(?=\\s)"
+				}
+			]
+		},
+
+		"constants": {
+			"patterns": [
+				{
+					"name": "constant.language.llvm",
+					"match": "\\b(true|false|null|none|undef|poison|zeroinitializer)\\b"
+				}
+			]
+		},
+
+		"instructions-control-flow": {
+			"patterns": [
+				{
+					"name": "keyword.control.flow.llvm",
+					"match": "\\b(ret|br|switch|indirectbr|invoke|callbr|resume|catchswitch|catchret|cleanupret|unreachable|musttail|notail|tail|call|unwind)\\b"
+				}
+			]
+		},
+
+		"instructions": {
+			"patterns": [
+				{
+					"name": "keyword.other.operator.llvm",
+					"match": "\\b(fneg|fadd|fsub|fmul|fdiv|frem|add|sub|mul|udiv|sdiv|urem|srem|shl|lshr|ashr|and|or|xor|extractelement|insertelement|shufflevector|extractvalue|insertvalue|alloca|load|store|fence|cmpxchg|atomicrmw|getelementptr|trunc|zext|sext|fptrunc|fpext|fptoui|fptosi|uitofp|sitofp|ptrtoint|inttoptr|bitcast|addrspacecast|icmp|fcmp|phi|select|freeze|va_arg|landingpad|catchpad|cleanuppad)\\b"
+				}
+			]
+		},
+
+		"comparison-predicates": {
+			"patterns": [
+				{
+					"name": "keyword.operator.comparison.llvm",
+					"match": "\\b(oeq|ogt|oge|olt|ole|one|ord|ueq|une|uno|ugt|uge|ult|ule|sgt|sge|slt|sle|eq|ne)\\b"
+				}
+			]
+		},
+
+		"linkage": {
+			"patterns": [
+				{
+					"comment": "Linkage, visibility, DLL storage, thread locality, preemption",
+					"name": "storage.modifier.linkage.llvm",
+					"match": "\\b(private|internal|available_externally|linkonce_odr|linkonce|weak_odr|weak|common|appending|extern_weak|external|default|hidden|protected|dllimport|dllexport|thread_local|localdynamic|initialexec|localexec|dso_local|dso_preemptable|local_unnamed_addr|unnamed_addr|externally_initialized)\\b"
+				}
+			]
+		},
+
+		"calling-conventions": {
+			"patterns": [
+				{
+					"name": "storage.modifier.calling-convention.llvm",
+					"match": "\\b(ccc|fastcc|coldcc|ghccc|webkit_jscc|anyregcc|preserve_mostcc|preserve_allcc|preserve_nonecc|cxx_fast_tlscc|swifttailcc|swiftcc|tailcc|cfguard_checkcc|x86_stdcallcc|x86_fastcallcc|x86_thiscallcc|x86_vectorcallcc|x86_regcallcc|x86_intrcc|x86_64_sysvcc|win64cc|arm_apcscc|arm_aapcs_vfpcc|arm_aapcscc|aarch64_sve_vector_pcs|aarch64_vector_pcs|msp430_intrcc|avr_intrcc|avr_signalcc|ptx_kernel|ptx_device|spir_kernel|spir_func|intel_ocl_bicc|amdgpu_cs_chain_preserve|amdgpu_cs_chain|amdgpu_kernel|amdgpu_cs|amdgpu_es|amdgpu_gs|amdgpu_hs|amdgpu_ls|amdgpu_ps|amdgpu_vs|hhvm_ccc|hhvmcc)\\b"
+				},
+				{
+					"comment": "Numbered calling convention: cc 10",
+					"name": "storage.modifier.calling-convention.llvm",
+					"match": "\\bcc\\b(?=\\s+[0-9])"
+				}
+			]
+		},
+
+		"function-attributes": {
+			"patterns": [
+				{
+					"comment": "Memory effects: memory(none), memory(argmem: read, inaccessiblemem: write)",
+					"begin": "\\b(memory)\\s*(\\()",
+					"beginCaptures": {
+						"1": { "name": "storage.modifier.function-attribute.llvm" },
+						"2": { "name": "punctuation.section.parens.begin.llvm" }
+					},
+					"end": "\\)",
+					"endCaptures": {
+						"0": { "name": "punctuation.section.parens.end.llvm" }
+					},
+					"patterns": [
+						{
+							"name": "constant.language.memory-effect.llvm",
+							"match": "\\b(argmem|inaccessiblemem|readwrite|read|write|none)\\b"
+						}
+					]
+				},
+				{
+					"name": "storage.modifier.function-attribute.llvm",
+					"match": "\\b(alwaysinline|allocsize|allockind|argmemonly|builtin|cold|convergent|disable_sanitizer_instrumentation|fn_ret_thunk_extern|hot|inaccessiblemem_or_argmemonly|inaccessiblememonly|inlinehint|jumptable|memory|minsize|mustprogress|naked|nobuiltin|nocallback|nocf_check|noduplicate|nofree|noimplicitfloat|noinline|nomerge|nonlazybind|noprofile|norecurse|noredzone|noreturn|nosanitize_bounds|nosanitize_coverage|nosanitize|nosync|nounwind|null_pointer_is_valid|optdebug|optforfuzzing|optnone|optsize|presplitcoroutine|readnone|readonly|writeonly|returns_twice|safestack|sanitize_address|sanitize_hwaddress|sanitize_memory|sanitize_memtag|sanitize_numerical_stability|sanitize_realtime|sanitize_thread|shadowcallstack|speculatable|speculative_load_hardening|sspstrong|sspreq|ssp|strictfp|uwtable|vscale_range|willreturn)\\b"
+				}
+			]
+		},
+
+		"parameter-attributes": {
+			"patterns": [
+				{
+					"name": "storage.modifier.parameter-attribute.llvm",
+					"match": "\\b(zeroext|signext|inreg|byval|byref|preallocated|inalloca|sret|elementtype|alignstack|allocalign|allocptr|align|noalias|nocapture|captures|nest|returned|nonnull|dereferenceable_or_null|dereferenceable|swiftself|swiftasync|swifterror|immarg|noundef|nofpclass|writable|initializes|dead_on_unwind|range)\\b"
+				}
+			]
+		},
+
+		"keywords": {
+			"patterns": [
+				{
+					"comment": "Module-level and instruction-level keywords",
+					"name": "keyword.other.llvm",
+					"match": "\\b(define|declare|global|constant|target|datalayout|triple|source_filename|module|asm|sideeffect|inteldialect|type|to|within|distinct|attributes|alias|ifunc|comdat|any|exactmatch|largest|nodeduplicate|samesize|section|partition|addrspace|blockaddress|dso_local_equivalent|no_cfi|ptrauth|personality|prologue|prefix|gc|uselistorder_bb|uselistorder|filter|cleanup|vscale|splat)\\b"
+				},
+				{
+					"comment": "Instruction modifiers and fast-math flags",
+					"name": "keyword.other.modifier.llvm",
+					"match": "\\b(nsw|nuw|exact|disjoint|nneg|samesign|inbounds|inrange|volatile|atomic|syncscope|singlethread|unordered|monotonic|acquire|release|acq_rel|seq_cst|nnan|ninf|nsz|arcp|contract|afn|reassoc|fast)\\b"
+				},
+				{
+					"comment": "atomicrmw operations",
+					"name": "keyword.other.atomic.llvm",
+					"match": "\\b(xchg|nand|umax|umin|fmax|fmin|fmaximum|fminimum|max|min|uinc_wrap|udec_wrap|usub_cond|usub_sat)\\b"
+				}
+			]
+		},
+
+		"numbers": {
+			"patterns": [
+				{
+					"comment": "Hexadecimal integers and hex-encoded floating point (0xK, 0xL, 0xM, 0xH, 0xR)",
+					"name": "constant.numeric.hex.llvm",
+					"match": "\\b0x[KLMHR]?[0-9A-Fa-f]+\\b"
+				},
+				{
+					"name": "constant.numeric.float.llvm",
+					"match": "[-+]?\\b[0-9]+\\.[0-9]*(?:[eE][-+]?[0-9]+)?"
+				},
+				{
+					"name": "constant.numeric.integer.llvm",
+					"match": "[-+]?\\b[0-9]+\\b"
+				}
+			]
+		},
+
+		"operators": {
+			"patterns": [
+				{
+					"name": "keyword.operator.variadic.llvm",
+					"match": "\\.\\.\\."
+				},
+				{
+					"name": "keyword.operator.assignment.llvm",
+					"match": "="
+				},
+				{
+					"name": "keyword.operator.pointer.llvm",
+					"match": "\\*"
+				}
+			]
+		}
+	}
+}
