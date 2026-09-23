@@ -220,7 +220,8 @@ function analyze(text) {
       Object.assign(functionSymbol, { parameters, returnType, variadic, declaration });
       functionSymbol.definition = text.slice(token.start, bodyOpen >= 0 ? code[bodyOpen].start : end).trim();
       const fn = { name: functionSymbol.name, start: token.start, end, bodyStart: bodyOpen >= 0 ? code[bodyOpen].end : end, bodyEnd: bodyClose >= 0 ? code[bodyClose].start : end, symbol: functionSymbol,
-        open: bodyOpen >= 0 ? code[bodyOpen] : undefined, unclosed: bodyOpen >= 0 && bodyClose < 0, headerEnd: code[close].end };
+        open: bodyOpen >= 0 ? code[bodyOpen] : undefined, unclosed: bodyOpen >= 0 && bodyClose < 0, headerEnd: code[close].end,
+        parametersStart: code[open].end, parametersEnd: code[close].start };
       functions.push(fn);
       for (const parameter of parameters) {
         if (!parameter.name) continue;
@@ -705,19 +706,19 @@ function resolve(analysis, token) {
   if (!token) return undefined;
   const defined = analysis._index.definitions.get(token.start);
   if (defined) {
-    if (defined.kind === 'function') return analysis.symbols.find(entry => entry.kind === 'function' && sameName(entry.name, defined.name) && !entry.declaration) || defined;
+    if (defined.kind === 'function') return named(analysis, defined.name).find(entry => entry.kind === 'function' && entry.scope === null && !entry.declaration) || defined;
     return defined;
   }
   if (token.kind !== 'identifier') return undefined;
-  const candidates = named(analysis, token.text);
   // A blockaddress names the block in its explicit function operand, even in a
   // global initializer or in the body of a different function.
   const blockFunction = analysis._index.blockaddressTargets.get(token.start);
-  if (blockFunction) return candidates.find(entry => entry.kind === 'label' && sameName(entry.scope, blockFunction));
+  if (blockFunction) return scoped(analysis, blockFunction, token.text).find(entry => entry.kind === 'label');
+  const candidates = named(analysis, token.text);
   if (analysis._index.typeOffsets.has(token.start)) return candidates.find(entry => entry.kind === 'type');
   const scope = scopeAt(analysis, token.start);
   if (token.text[0] === '%' && scope) {
-    const local = candidates.find(entry => sameName(entry.scope, scope));
+    const local = scoped(analysis, scope, token.text)[0];
     if (local) return local;
   }
   return candidates.find(entry => entry.scope === null && entry.kind === 'function' && !entry.declaration) || candidates.find(entry => entry.scope === null);
@@ -736,6 +737,27 @@ function named(analysis, name) {
     analysis._index.named = index;
   }
   return index.get(canonicalName(name)) || [];
+}
+
+// Symbols by function and canonical name, in source order. Clang reuses local
+// names such as %0 and %this.addr in every function, so a lookup by name
+// alone would scan one candidate per function.
+function scoped(analysis, scope, name) {
+  let index = analysis._index.scoped;
+  if (!index) {
+    index = new Map();
+    for (const entry of analysis.symbols) {
+      if (entry.scope === null) continue;
+      const fn = canonicalName(entry.scope), id = canonicalName(entry.name);
+      let names = index.get(fn);
+      if (!names) index.set(fn, names = new Map());
+      let entries = names.get(id);
+      if (!entries) names.set(id, entries = []);
+      entries.push(entry);
+    }
+    analysis._index.scoped = index;
+  }
+  return index.get(canonicalName(scope))?.get(canonicalName(name)) || [];
 }
 
 function symbolAt(analysis, offset) { return resolve(analysis, tokenAt(analysis, offset)); }
@@ -952,7 +974,36 @@ const leadingResultType = new Set('alloca load getelementptr phi call invoke cal
 
 // What belongs at the cursor inside a function body: a block label, a
 // comparison predicate, or a value of an expected type (undefined if unknown).
+// Where a type or a parameter attribute can follow in a define/declare parameter list.
+const parameterTypes = 'i1 i8 i16 i32 i64 i128 ptr half bfloat float double fp128 x86_fp80 ppc_fp128 metadata'.split(' ');
+const parameterAttributes = 'noundef nonnull noalias nocapture captures readonly writeonly readnone signext zeroext inreg byval byref sret align dereferenceable dereferenceable_or_null returned immarg inalloca preallocated elementtype nest swiftself swifterror'.split(' ');
+
+// Completion in a function header's parameter list: a type starts each
+// parameter; after it come attributes and a new name, never existing values.
+function parameterContext(analysis, offset, prefixStart) {
+  const fn = analysis.functions.find(item => item.parametersStart !== undefined && prefixStart >= item.parametersStart && offset <= item.parametersEnd);
+  if (!fn) return undefined;
+  const code = analysis._index.code;
+  let low = 0, high = code.length;
+  while (low < high) { const middle = (low + high) >>> 1; if (code[middle].start < fn.parametersStart) low = middle + 1; else high = middle; }
+  let current = [];
+  const stack = [];
+  for (let i = low; i < code.length; i++) {
+    const token = code[i];
+    if (token.start >= prefixStart) break;
+    if (closeFor[token.text]) stack.push(closeFor[token.text]);
+    else if (stack.length && token.text === stack[stack.length - 1]) stack.pop();
+    else if (!stack.length && token.text === ',') { current = []; continue; }
+    current.push(token);
+  }
+  if (!current.length) return { kind: 'parameter', expect: 'type', types: parameterTypes, named: analysis.symbols.filter(symbol => symbol.kind === 'type') };
+  const type = readType(current, 0);
+  return type && type.next <= current.length ? { kind: 'parameter', expect: 'attribute', attributes: parameterAttributes } : undefined;
+}
+
 function completionContext(analysis, offset, prefixStart = offset) {
+  const header = parameterContext(analysis, offset, prefixStart);
+  if (header) return header;
   const fn = bodyAt(analysis, offset);
   const statement = fn && enclosingStatement(analysis, fn, prefixStart);
   if (!statement) return undefined;
