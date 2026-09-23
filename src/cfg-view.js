@@ -238,7 +238,10 @@ function createGraphView(vscode, analyze) {
     const target = block.label || { start: block.start, end: block.start };
     const range = new vscode.Range(document.positionAt(target.start), document.positionAt(target.end));
     const visible = vscode.window.visibleTextEditors.find(item => item.document === document);
-    const editor = await vscode.window.showTextDocument(document, { viewColumn: visible?.viewColumn ?? vscode.ViewColumn.One, selection: range });
+    // Passing `selection` to showTextDocument always centers it; set the
+    // selection afterwards so a label that is already on screen stays put.
+    const editor = await vscode.window.showTextDocument(document, { viewColumn: visible?.viewColumn ?? vscode.ViewColumn.One });
+    editor.selection = new vscode.Selection(range.start, range.end);
     editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
   }
   return {

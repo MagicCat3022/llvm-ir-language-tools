@@ -1130,6 +1130,17 @@ test('parameter lists complete types, then attributes, never existing values', (
   providers.dispose();
 });
 
+test('hover prose keeps ordinary spaces so it wraps, and escapes Markdown', () => {
+  const providers = extension.createProviders();
+  const doc = document('define i32 @sum_to(i32 %n) {\nentry:\n  %my_value = add i32 %n, 1\n  ret i32 %my_value\n}\n');
+  const hover = providers.hover.provideHover(doc, doc.at('%my_value = add', 2));
+  const value = hover.contents.value;
+  // VS Code's own appendText writes &nbsp; for every space, which cannot wrap.
+  assert.doesNotMatch(value, /&nbsp;| /);
+  assert.match(value, /Line 3 in @sum\\_to/);
+  providers.dispose();
+});
+
 const loop = ['define i32 @count(i32 %n) {', 'entry:', '  br label %loop', 'loop:', '  %i = phi i32 [ 0, %entry ], [ %next, %body ]',
   '  %c = icmp slt i32 %i, %n', '  br i1 %c, label %body, label %done', 'body:', '  %next = add i32 %i, 1', '  br label %loop',
   'done:                                             ; preds = %loop', '  ret i32 %i', 'dead:', '  ret i32 0', '}'].join('\n');
@@ -1211,7 +1222,8 @@ test('the graph view follows the cursor and reveals clicked blocks', async () =>
   let receive;
   const panel = { title: '', webview: { html: '', cspSource: 'vscode-resource:', postMessage: message => { posted.push(message); return Promise.resolve(true); }, onDidReceiveMessage: callback => { receive = callback; } },
     onDidDispose() {}, reveal() {}, dispose() {} };
-  const editor = { document: doc, selection: { active: doc.at('entry:') }, viewColumn: 1, revealRange() {} };
+  const revealed = [];
+  const editor = { document: doc, selection: { active: doc.at('entry:') }, viewColumn: 1, revealRange: (range, type) => revealed.push(type) };
   const fake = { ...mock, window: { ...mock.window, activeTextEditor: editor, visibleTextEditors: [editor], createWebviewPanel: () => panel,
     showTextDocument: async (document, options) => { shown.push(options.selection); return editor; } } };
   const view = createGraphView(fake, providers.analyze);
@@ -1223,6 +1235,10 @@ test('the graph view follows the cursor and reveals clicked blocks', async () =>
   assert.deepEqual(posted, [{ type: 'select', index: 2 }]);
   receive({ type: 'reveal', index: 3 });
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(doc.getText(shown[0]), 'done');
+  // The label is selected, and only scrolled to when off screen: a selection
+  // passed to showTextDocument would always recenter the editor.
+  assert.equal(doc.getText(editor.selection), 'done');
+  assert.deepEqual(shown, [undefined]);
+  assert.deepEqual(revealed, ['InCenterIfOutsideViewport']);
   view.dispose(); providers.dispose();
 });
