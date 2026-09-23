@@ -49,7 +49,7 @@ From the repository root:
 npm ci --ignore-scripts
 npm test
 npm run package
-code --install-extension ./llvm-ir-language-tools-1.2.8.vsix
+code --install-extension ./llvm-ir-language-tools-1.2.9.vsix
 ```
 
 Alternatively use **Extensions → … → Install from VSIX**. Disable
@@ -290,6 +290,18 @@ The host tests also tokenize against the actual bundled Dark Modern and Light
 Modern themes, asserting six distinct role colors and matching label references.
 Multi-root tests use copied temporary fixtures to check unopened-file navigation,
 cross-file references/rename, collisions, exclusions, library hovers and dirty buffers.
+`VSCODE_VERSION=1.85.0 npm run test:integration` tests a specific release; CI runs
+1.85.0 (the oldest supported) and the latest.
+
+To measure what one keystroke costs in each editor feature, run the benchmark on
+any IR files, for example clang output (`clang -S -emit-llvm`):
+
+```sh
+npm run bench -- big.ll other.ll --runs 5
+```
+
+It prints the median milliseconds per feature. On a 1.7 MB `-O2` C++ module a
+keystroke costs about 0.5 s in total, and about 1 s at 3.7 MB (`-O0`).
 
 ## Attribution and references
 
